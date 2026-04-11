@@ -59,7 +59,7 @@ app.get('/api/video', async (req, res) => {
 
         if (!configToken) return res.json({ success: false, message: "Sayfa koruması (Cloudflare) geçilemedi veya token yok." });
 
-        // 2. Token'i Post Et (Burada encodeURIComponent ekledik, şifre bozulmasını engeller)
+        // 2. Token'i Post Et
         const res2 = await axios.post(`${MAIN_URL}/ajax-player-config`, `cfg=${encodeURIComponent(configToken)}`, {
             headers: { 
                 ...headers, 
@@ -72,22 +72,25 @@ app.get('/api/video', async (req, res) => {
             }
         });
 
-        // Eğer site JSON yerine HTML döndürdüyse yakala
         let configData = res2.data;
         if (typeof configData === 'string') {
-            try {
-                configData = JSON.parse(configData);
-            } catch(err) {
-                return res.json({ success: false, message: "Site JSON yerine HTML döndürdü (Cloudflare Engeli)." });
-            }
+            try { configData = JSON.parse(configData); } 
+            catch(err) { return res.json({ success: false, message: "Site HTML döndürdü." }); }
         }
 
-        // Eğer 'v' değeri yoksa sitenin tam olarak ne cevap verdiğini ekrana yazdır (Sorunu anlamak için)
-        if (!configData || !configData.v) {
-            return res.json({ success: false, message: `Embed linki alınamadı. Sitenin cevabı: ${JSON.stringify(configData)}` });
+        // BURASI DÜZELTİLDİ: Sitenin yeni gönderdiği yapıya (config.v) uyum sağlandı.
+        let embedUrlRaw = null;
+        if (configData.config && configData.config.v) {
+            embedUrlRaw = configData.config.v;
+        } else if (configData.v) {
+            embedUrlRaw = configData.v;
         }
 
-        let embedUrl = configData.v.replace(/\\\//g, '/');
+        if (!embedUrlRaw) {
+            return res.json({ success: false, message: `Embed linki yapısı değişmiş: ${JSON.stringify(configData)}` });
+        }
+
+        let embedUrl = embedUrlRaw.replace(/\\\//g, '/');
         if (!embedUrl.startsWith('http')) embedUrl = `https:${embedUrl}`;
 
         // 3. Videoyu Çöz
@@ -100,14 +103,19 @@ app.get('/api/video', async (req, res) => {
             if (sourceMatch) {
                 return res.json({ success: true, m3u8: sourceMatch[1].replace(/\\\//g, '/') });
             } else {
-                return res.json({ success: false, message: "Imagestoo linki bulunamadı. Yanıt: " + res3.data.substring(0, 50) });
+                return res.json({ success: false, message: "Imagestoo linki bulunamadı." });
             }
         } else {
+            // Sitenin kendi player'ı veya alternatif sunucu
             const res4 = await axios.get(embedUrl, { headers: { "User-Agent": headers["User-Agent"], "Referer": url } });
             const m3u8Match = res4.data.match(/file\s*:\s*["']([^"']+\.m3u8.*?)["']/);
-            if (m3u8Match) return res.json({ success: true, m3u8: m3u8Match[1] });
+            if (m3u8Match) {
+                return res.json({ success: true, m3u8: m3u8Match[1] });
+            } else {
+                // Eğer regex .m3u8 bulamazsa sayfanın kaynak kodunun bir kısmını döndür ki ne olduğunu görelim
+                return res.json({ success: false, message: `M3U8 bulunamadı. Sunucu: ${embedUrl}` });
+            }
         }
-        res.json({ success: false, message: "M3U8 linki regex ile bulunamadı." });
     } catch (e) { res.status(500).json({ success: false, message: "Sunucu hatası: " + e.message }); }
 });
 
