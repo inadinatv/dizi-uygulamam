@@ -52,7 +52,6 @@ app.get('/api/video', async (req, res) => {
         const $ = cheerio.load(res1.data);
         const configToken = $('#videoContainer').attr('data-cfg');
         
-        // Çerezleri daha güvenli birleştir
         let cookies = "";
         if (res1.headers['set-cookie']) {
             cookies = res1.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
@@ -60,11 +59,12 @@ app.get('/api/video', async (req, res) => {
 
         if (!configToken) return res.json({ success: false, message: "Sayfa koruması (Cloudflare) geçilemedi veya token yok." });
 
-        // 2. Token'i Post Et
-        const res2 = await axios.post(`${MAIN_URL}/ajax-player-config`, `cfg=${configToken}`, {
+        // 2. Token'i Post Et (Burada encodeURIComponent ekledik, şifre bozulmasını engeller)
+        const res2 = await axios.post(`${MAIN_URL}/ajax-player-config`, `cfg=${encodeURIComponent(configToken)}`, {
             headers: { 
                 ...headers, 
-                "Content-Type": "application/x-www-form-urlencoded", 
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", 
                 "X-Requested-With": "XMLHttpRequest", 
                 "Origin": MAIN_URL, 
                 "Referer": url, 
@@ -72,8 +72,20 @@ app.get('/api/video', async (req, res) => {
             }
         });
 
-        const configData = typeof res2.data === 'string' ? JSON.parse(res2.data) : res2.data;
-        if (!configData.v) return res.json({ success: false, message: "Embed linki alınamadı." });
+        // Eğer site JSON yerine HTML döndürdüyse yakala
+        let configData = res2.data;
+        if (typeof configData === 'string') {
+            try {
+                configData = JSON.parse(configData);
+            } catch(err) {
+                return res.json({ success: false, message: "Site JSON yerine HTML döndürdü (Cloudflare Engeli)." });
+            }
+        }
+
+        // Eğer 'v' değeri yoksa sitenin tam olarak ne cevap verdiğini ekrana yazdır (Sorunu anlamak için)
+        if (!configData || !configData.v) {
+            return res.json({ success: false, message: `Embed linki alınamadı. Sitenin cevabı: ${JSON.stringify(configData)}` });
+        }
 
         let embedUrl = configData.v.replace(/\\\//g, '/');
         if (!embedUrl.startsWith('http')) embedUrl = `https:${embedUrl}`;
@@ -82,21 +94,21 @@ app.get('/api/video', async (req, res) => {
         if (embedUrl.includes('imagestoo')) {
             const videoId = embedUrl.split('/').pop();
             const res3 = await axios.post(`https://imagestoo.com/player/index.php?data=${videoId}&do=getVideo`, "", { 
-                headers: { ...headers, "X-Requested-With": "XMLHttpRequest", "Referer": embedUrl }
+                headers: { "User-Agent": headers["User-Agent"], "X-Requested-With": "XMLHttpRequest", "Referer": embedUrl }
             });
             const sourceMatch = res3.data.match(/"securedLink"\s*:\s*"([^"]+)"/);
             if (sourceMatch) {
                 return res.json({ success: true, m3u8: sourceMatch[1].replace(/\\\//g, '/') });
             } else {
-                return res.json({ success: false, message: "Imagestoo m3u8 linki bulunamadı." });
+                return res.json({ success: false, message: "Imagestoo linki bulunamadı. Yanıt: " + res3.data.substring(0, 50) });
             }
         } else {
-            const res4 = await axios.get(embedUrl, { headers: { ...headers, "Referer": url } });
+            const res4 = await axios.get(embedUrl, { headers: { "User-Agent": headers["User-Agent"], "Referer": url } });
             const m3u8Match = res4.data.match(/file\s*:\s*["']([^"']+\.m3u8.*?)["']/);
             if (m3u8Match) return res.json({ success: true, m3u8: m3u8Match[1] });
         }
-        res.json({ success: false, message: "M3U8 linki bulunamadı." });
-    } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+        res.json({ success: false, message: "M3U8 linki regex ile bulunamadı." });
+    } catch (e) { res.status(500).json({ success: false, message: "Sunucu hatası: " + e.message }); }
 });
 
 module.exports = app;
