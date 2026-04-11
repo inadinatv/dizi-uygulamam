@@ -7,7 +7,10 @@
     <style>
         body { margin: 0; background: #121212; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh;}
         .btn-back { position: absolute; top: 0; left: 0; width: 100%; padding: 15px; background: #333; color: #fff; text-decoration: none; text-align: center; box-sizing: border-box; font-weight: bold;}
-        .btn-play { display: none; padding: 20px 40px; background: #e50914; color: #fff; text-decoration: none; border-radius: 50px; font-size: 20px; font-weight: bold; box-shadow: 0 4px 15px rgba(229, 9, 20, 0.5); text-align: center;}
+        
+        .btn-play { display: none; padding: 15px 20px; background: #e50914; color: #fff; text-decoration: none; border-radius: 30px; font-size: 18px; font-weight: bold; box-shadow: 0 4px 15px rgba(229, 9, 20, 0.5); text-align: center; width: 85%; max-width: 350px; margin-bottom: 15px;}
+        .btn-web { background: #555; box-shadow: none; font-size: 16px;}
+        
         #info { margin-top: 50px; padding: 20px; text-align: center; color: #aaa; }
     </style>
 </head>
@@ -15,12 +18,16 @@
 
 <a href="#" onclick="history.back()" class="btn-back">⬅ Bölümlere Dön</a>
 <h3 id="info">Video Kaynağı Aranıyor... Lütfen Bekleyin ⏳</h3>
-<a id="play-button" href="#" class="btn-play">🎬 ExoPlayer'da Aç</a>
+
+<!-- İki farklı oynatma seçeneği -->
+<a id="play-button" href="#" class="btn-play">🎬 ExoPlayer'da Aç (Önerilen)</a>
+<a id="web-button" href="#" class="btn-play btn-web">🌐 Web Oynatıcıda Aç (Alternatif)</a>
 
 <script>
 async function prepareVideo() {
     const info = document.getElementById('info');
     const playBtn = document.getElementById('play-button');
+    const webBtn = document.getElementById('web-button');
     const url = new URLSearchParams(window.location.search).get('url');
     
     try {
@@ -30,17 +37,27 @@ async function prepareVideo() {
         if(data.success) {
             info.style.display = 'none'; 
             playBtn.style.display = 'block'; 
+            webBtn.style.display = 'block'; 
             
-            // ExoPlayer Header Taktiği (| İşareti)
+            // ExoPlayer Header Taktiği (Origin + Referer + User-Agent)
             const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
             let finalVideoUrl = data.m3u8;
 
-            // Eğer API bize referer (embed linki) gönderdiyse linkin sonuna ekle
             if (data.referer) {
-                finalVideoUrl += `|Referer=${data.referer}&User-Agent=${userAgent}`;
+                try {
+                    // Referer'den ana siteyi (Origin) ayıklıyoruz
+                    const originUrl = new URL(data.referer).origin; 
+                    
+                    // Nginx 403 hatasını aşmak için en kapsamlı header formatı:
+                    finalVideoUrl += `|Origin=${originUrl}&Referer=${data.referer}&User-Agent=${userAgent}`;
+                } catch(err) {}
             }
             
+            // ExoPlayer linki
             playBtn.href = finalVideoUrl;
+            
+            // Alternatif Web Oynatıcı (IP Engeline takılırsa site embed sayfasını direkt açacak)
+            webBtn.href = data.referer; 
             
         } else { 
             info.innerText = 'Hata: ' + (data.message || 'Video bulunamadı.'); 
