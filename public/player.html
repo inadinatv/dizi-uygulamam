@@ -3,64 +3,85 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="referrer" content="no-referrer">
-    <title>Video Yükleniyor...</title>
+    <title>Gelişmiş Oynatıcı</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
-        body { margin: 0; background: #000; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; }
-        .loader { text-align: center; }
-        .error { color: #e50914; display: none; padding: 20px; text-align: center; }
+        body { margin: 0; background: #000; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; overflow: hidden; }
+        .btn-back { position: absolute; top: 0; left: 0; width: 100%; padding: 15px; background: #e50914; color: #fff; text-decoration: none; text-align: center; font-weight: bold; z-index: 10; box-sizing: border-box;}
+        
+        video { width: 100%; height: 100vh; outline: none; background: #000; }
+        iframe { width: 100%; height: 100vh; border: none; display: none; background: #000; }
+        
+        #info { padding: 20px; text-align: center; color: #aaa; z-index: 5; margin-top: 50px;}
     </style>
 </head>
 <body>
 
-<div id="loader" class="loader">
-    <h3>Güvenlik Duvarı Aşılıyor...</h3>
-    <p>Video sayfasına yönlendiriliyorsunuz, lütfen bekleyin.</p>
-</div>
+<a href="#" onclick="history.back()" class="btn-back">⬅ Bölümlere Dön</a>
+<h3 id="info">Güvenlik Aşılıyor... Lütfen Bekleyin ⏳</h3>
 
-<div id="error" class="error">
-    <h3>Hata Oluştu!</h3>
-    <p id="err-msg">Video kaynağına ulaşılamadı.</p>
-    <button onclick="location.reload()" style="padding:10px; background:#333; color:#fff; border:none; border-radius:5px;">Tekrar Dene</button>
-</div>
+<!-- Plan A: Kendi Sınırsız Oynatıcımız -->
+<video id="video" controls playsinline style="display:none;"></video>
+
+<!-- Plan B: Kırılmış Embed -->
+<iframe id="iframe-container" allowfullscreen></iframe>
 
 <script>
-async function redirectToVideo() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const url = urlParams.get('url');
+async function initPlayer() {
+    const info = document.getElementById('info');
+    const video = document.getElementById('video');
+    const iframe = document.getElementById('iframe-container');
+    const url = new URLSearchParams(window.location.search).get('url');
     
-    if(!url) {
-        document.getElementById('loader').style.display = 'none';
-        document.getElementById('error').style.display = 'block';
-        return;
-    }
-
     try {
-        // Vercel API'mizden gizli embed linkini alıyoruz
         const res = await fetch(`/api/video?url=${encodeURIComponent(url)}`);
         const data = await res.json();
         
-        if(data.success && data.embedUrl) {
-            // IFRAME KULLANMIYORUZ. Sayfayı direkt video linkine gönderiyoruz.
-            // no-referrer meta etiketi sayesinde site bizim nerden geldiğimizi anlamayacak.
-            window.location.replace(data.embedUrl);
-        } else {
-            showError(data.message || "Video linki çözülemedi.");
+        if(data.success) {
+            info.style.display = 'none';
+            
+            // A Planı: M3U8 Linkini Vercel üzerinden şifrelenmiş olarak getir
+            const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(data.m3u8)}&referer=${encodeURIComponent(data.referer)}`;
+            
+            video.style.display = 'block';
+            
+            // Eğer telefon HLS destekliyorsa (Android Chrome, Webview)
+            if(Hls.isSupported()){ 
+                const hls = new Hls(); 
+                hls.loadSource(proxyUrl); 
+                hls.attachMedia(video); 
+                hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+                
+                // Eğer video CDN tarafından engellenirse B PLANINA GEÇ!
+                hls.on(Hls.Events.ERROR, function (event, errData) {
+                    if (errData.fatal) {
+                        video.style.display = 'none';
+                        hls.destroy();
+                        
+                        iframe.style.display = 'block';
+                        iframe.src = `/api/embed_proxy?url=${encodeURIComponent(data.referer)}`;
+                    }
+                });
+            }
+            // iOS cihazlar için direkt destek
+            else if(video.canPlayType('application/vnd.apple.mpegurl')) { 
+                video.src = proxyUrl; 
+                video.play(); 
+                
+                video.onerror = () => {
+                    video.style.display = 'none';
+                    iframe.style.display = 'block';
+                    iframe.src = `/api/embed_proxy?url=${encodeURIComponent(data.referer)}`;
+                };
+            }
+        } else { 
+            info.innerText = 'Hata: ' + (data.message || 'Bulunamadı'); 
         }
-    } catch (e) {
-        showError("Sunucu hatası: Bağlantı kesildi.");
+    } catch(e) {
+        info.innerText = 'Sunucu Hatası!';
     }
 }
-
-function showError(msg) {
-    document.getElementById('loader').style.display = 'none';
-    const errDiv = document.getElementById('error');
-    errDiv.style.display = 'block';
-    document.getElementById('err-msg').innerText = msg;
-}
-
-// Sayfa açılır açılmaz işlemi başlat
-redirectToVideo();
+initPlayer();
 </script>
 
 </body>
