@@ -3,43 +3,65 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Oynatıcı</title>
+    <meta name="referrer" content="no-referrer">
+    <title>Video Yükleniyor...</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
-        .back-btn { position: absolute; top: 0; left: 0; width: 100%; padding: 15px; background: rgba(229, 9, 20, 0.8); color: #fff; text-decoration: none; text-align: center; z-index: 100; font-weight: bold; }
-        iframe { width: 100%; height: 100vh; border: none; }
-        #loader { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; text-align: center; }
+        body { margin: 0; background: #000; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; }
+        .loader { text-align: center; }
+        .error { color: #e50914; display: none; padding: 20px; text-align: center; }
     </style>
 </head>
 <body>
 
-<a href="#" onclick="history.back()" class="back-btn">⬅ Bölümlere Dön</a>
-<div id="loader">Video Hazırlanıyor...</div>
-<div id="player-container"></div>
+<div id="loader" class="loader">
+    <h3>Güvenlik Duvarı Aşılıyor...</h3>
+    <p>Video sayfasına yönlendiriliyorsunuz, lütfen bekleyin.</p>
+</div>
+
+<div id="error" class="error">
+    <h3>Hata Oluştu!</h3>
+    <p id="err-msg">Video kaynağına ulaşılamadı.</p>
+    <button onclick="location.reload()" style="padding:10px; background:#333; color:#fff; border:none; border-radius:5px;">Tekrar Dene</button>
+</div>
 
 <script>
-async function loadVideo() {
-    const url = new URLSearchParams(window.location.search).get('url');
+async function redirectToVideo() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const url = urlParams.get('url');
+    
+    if(!url) {
+        document.getElementById('loader').style.display = 'none';
+        document.getElementById('error').style.display = 'block';
+        return;
+    }
+
     try {
+        // Vercel API'mizden gizli embed linkini alıyoruz
         const res = await fetch(`/api/video?url=${encodeURIComponent(url)}`);
         const data = await res.json();
         
-        if(data.success) {
-            document.getElementById('loader').style.display = 'none';
-            // Siyah ekranı bitiren 'Referrer Policy' ayarlı iframe
-            const iframe = document.createElement('iframe');
-            iframe.src = data.embedUrl;
-            iframe.allowFullscreen = true;
-            iframe.setAttribute('referrerpolicy', 'no-referrer'); // KORUMALARI KIRAN KRİTİK SATIR
-            document.getElementById('player-container').appendChild(iframe);
+        if(data.success && data.embedUrl) {
+            // IFRAME KULLANMIYORUZ. Sayfayı direkt video linkine gönderiyoruz.
+            // no-referrer meta etiketi sayesinde site bizim nerden geldiğimizi anlamayacak.
+            window.location.replace(data.embedUrl);
         } else {
-            document.getElementById('loader').innerText = "Hata: Video Kaynağı Bulunamadı.";
+            showError(data.message || "Video linki çözülemedi.");
         }
-    } catch(e) {
-        document.getElementById('loader').innerText = "Sunucu Bağlantı Hatası.";
+    } catch (e) {
+        showError("Sunucu hatası: Bağlantı kesildi.");
     }
 }
-loadVideo();
+
+function showError(msg) {
+    document.getElementById('loader').style.display = 'none';
+    const errDiv = document.getElementById('error');
+    errDiv.style.display = 'block';
+    document.getElementById('err-msg').innerText = msg;
+}
+
+// Sayfa açılır açılmaz işlemi başlat
+redirectToVideo();
 </script>
+
 </body>
 </html>
