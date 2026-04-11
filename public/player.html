@@ -1,0 +1,20 @@
+<!DOCTYPE html><html lang="tr"><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>body{margin:0;background:#000;color:#fff;} video{width:100%;} .btn{display:block;padding:15px;background:#e50914;color:#fff;text-decoration:none;text-align:center;}</style>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script></head><body>
+<a href="#" onclick="history.back()" class="btn">⬅ Geri Dön</a>
+<h4 id="info" style="padding:15px;">Video Çözülüyor (Bekleyin)...</h4>
+<video id="vid" controls></video>
+<script>
+async function play() {
+    const url = new URLSearchParams(window.location.search).get('url');
+    const res = await fetch(`/api/video?url=${encodeURIComponent(url)}`);
+    const data = await res.json();
+    if(data.success) {
+        document.getElementById('info').innerText = 'İyi Seyirler!';
+        const video = document.getElementById('vid');
+        if(Hls.isSupported()){ const hls = new Hls(); hls.loadSource(data.m3u8); hls.attachMedia(video); hls.on(Hls.Events.MANIFEST_PARSED,()=>video.play()); }
+        else { video.src = data.m3u8; video.play(); }
+    } else { document.getElementById('info').innerText = 'Hata: Video bulunamadı.'; }
+}
+play();
+</script></body></html>
