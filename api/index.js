@@ -17,7 +17,7 @@ app.get('/api/category', async (req, res) => {
     try {
         const response = await axios.get(`${MAIN_URL}/platform/${req.query.name || "netflix"}`, { headers });
         const $ = cheerio.load(response.data);
-        let series = [];
+        let series =[];
         $('ul.content-grid > li').each((i, el) => {
             const title = $(el).find('div.card-info h3').text().trim();
             const link = $(el).find('a').attr('href');
@@ -32,7 +32,7 @@ app.get('/api/episodes', async (req, res) => {
     try {
         const response = await axios.get(req.query.url, { headers });
         const $ = cheerio.load(response.data);
-        let episodes = [];
+        let episodes =[];
         $('div.detail-episode-item-wrap').each((i, el) => {
             const epName = $(el).find('div.detail-episode-title').text().trim();
             const epSubtitle = $(el).find('div.detail-episode-subtitle').text().trim();
@@ -46,8 +46,6 @@ app.get('/api/episodes', async (req, res) => {
 app.get('/api/video', async (req, res) => {
     try {
         const url = req.query.url;
-        
-        // 1. Sayfaya Git
         const res1 = await axios.get(url, { headers });
         const $ = cheerio.load(res1.data);
         const configToken = $('#videoContainer').attr('data-cfg');
@@ -59,7 +57,6 @@ app.get('/api/video', async (req, res) => {
 
         if (!configToken) return res.json({ success: false, message: "Sayfa koruması (Cloudflare) geçilemedi veya token yok." });
 
-        // 2. Token'i Post Et
         const res2 = await axios.post(`${MAIN_URL}/ajax-player-config`, `cfg=${encodeURIComponent(configToken)}`, {
             headers: { 
                 ...headers, 
@@ -78,7 +75,6 @@ app.get('/api/video', async (req, res) => {
             catch(err) { return res.json({ success: false, message: "Site HTML döndürdü." }); }
         }
 
-        // BURASI DÜZELTİLDİ: Sitenin yeni gönderdiği yapıya (config.v) uyum sağlandı.
         let embedUrlRaw = null;
         if (configData.config && configData.config.v) {
             embedUrlRaw = configData.config.v;
@@ -87,7 +83,7 @@ app.get('/api/video', async (req, res) => {
         }
 
         if (!embedUrlRaw) {
-            return res.json({ success: false, message: `Embed linki yapısı değişmiş: ${JSON.stringify(configData)}` });
+            return res.json({ success: false, message: `Embed linki yapısı değişmiş.` });
         }
 
         let embedUrl = embedUrlRaw.replace(/\\\//g, '/');
@@ -101,18 +97,18 @@ app.get('/api/video', async (req, res) => {
             });
             const sourceMatch = res3.data.match(/"securedLink"\s*:\s*"([^"]+)"/);
             if (sourceMatch) {
-                return res.json({ success: true, m3u8: sourceMatch[1].replace(/\\\//g, '/') });
+                // REFERER EKLENDİ
+                return res.json({ success: true, m3u8: sourceMatch[1].replace(/\\\//g, '/'), referer: embedUrl });
             } else {
                 return res.json({ success: false, message: "Imagestoo linki bulunamadı." });
             }
         } else {
-            // Sitenin kendi player'ı veya alternatif sunucu
             const res4 = await axios.get(embedUrl, { headers: { "User-Agent": headers["User-Agent"], "Referer": url } });
             const m3u8Match = res4.data.match(/file\s*:\s*["']([^"']+\.m3u8.*?)["']/);
             if (m3u8Match) {
-                return res.json({ success: true, m3u8: m3u8Match[1] });
+                // REFERER EKLENDİ
+                return res.json({ success: true, m3u8: m3u8Match[1], referer: embedUrl });
             } else {
-                // Eğer regex .m3u8 bulamazsa sayfanın kaynak kodunun bir kısmını döndür ki ne olduğunu görelim
                 return res.json({ success: false, message: `M3U8 bulunamadı. Sunucu: ${embedUrl}` });
             }
         }
