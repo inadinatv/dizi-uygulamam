@@ -1,8 +1,38 @@
-<div class="cats">
-    <button onclick="load('netflix')">Netflix</button> 
-    <button onclick="load('exxen')">Exxen</button>
-    <button onclick="load('disney')">Disney+</button>
-    <button onclick="load('amazon')">Amazon Prime</button>
-    <button onclick="load('max')">Max</button>
-    <button onclick="load('tabii')">Tabii</button>
-</div>
+<script>
+window.onload = () => load('netflix');
+
+async function load(cat) {
+    const grid = document.getElementById('grid'); 
+    grid.innerHTML = '<p style="text-align:center; width:100%; color:#aaa;">Yükleniyor...</p>';
+    
+    try {
+        const res = await fetch(`/api/category?name=${cat}`); 
+        const result = await res.json();
+        
+        grid.innerHTML = ''; // Ekranı temizle
+        
+        // Eğer Vercel veriyi başarıyla çekerse:
+        if (result.success && result.data) {
+            if (result.data.length === 0) {
+                grid.innerHTML = '<p style="text-align:center; width:100%; color:#aaa;">Bu kategoride içerik bulunamadı veya site tasarımı değişti.</p>';
+            } else {
+                result.data.forEach(item => {
+                    const div = document.createElement('div'); 
+                    div.className = 'card';
+                    div.innerHTML = `<img src="${item.poster}"><h3>${item.title}</h3>`;
+                    div.onclick = () => window.location.href = `dizi.html?url=${encodeURIComponent(item.link)}`;
+                    grid.appendChild(div);
+                });
+            }
+        } 
+        // Eğer Cloudflare engellediyse ekrana hatayı yazdır:
+        else {
+            grid.innerHTML = `<p style="text-align:center; width:100%; color:#e50914; font-weight:bold;">
+                Engellendi: ${result.message || 'Veri çekilemedi.'}</p>`;
+        }
+    } catch (e) {
+        grid.innerHTML = `<p style="text-align:center; width:100%; color:#e50914;">
+            Sistem Hatası: Vercel'e ulaşılamıyor. (${e.message})</p>`;
+    }
+}
+</script>
