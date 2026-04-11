@@ -1,0 +1,22 @@
+<!DOCTYPE html><html lang="tr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+*{margin:0;padding:0;font-family:sans-serif;} body{background:#121212;color:#fff;}
+.btn{display:block;padding:15px;margin:10px;background:#333;color:#fff;text-decoration:none;border-radius:5px;text-align:center;}
+</style></head><body>
+<a href="index.html" class="btn" style="background:#e50914;">⬅ Geri Dön</a>
+<h3 id="load" style="text-align:center;padding:20px;">Bölümler Yükleniyor...</h3>
+<div id="list"></div>
+<script>
+async function start() {
+    const url = new URLSearchParams(window.location.search).get('url');
+    const res = await fetch(`/api/episodes?url=${encodeURIComponent(url)}`);
+    const result = await res.json();
+    document.getElementById('load').style.display = 'none';
+    result.data.forEach(ep => {
+        const a = document.createElement('a'); a.className = 'btn'; a.innerText = ep.name;
+        a.href = `player.html?url=${encodeURIComponent(ep.link)}`;
+        document.getElementById('list').appendChild(a);
+    });
+}
+start();
+</script></body></html>
