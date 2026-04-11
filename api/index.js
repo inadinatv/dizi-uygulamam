@@ -55,64 +55,73 @@ app.get('/api/video', async (req, res) => {
             cookies = res1.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
         }
 
-        if (!configToken) return res.json({ success: false, message: "Sayfa koruması (Cloudflare) geçilemedi veya token yok." });
+        if (!configToken) return res.json({ success: false, message: "Sayfa koruması geçilemedi." });
 
         const res2 = await axios.post(`${MAIN_URL}/ajax-player-config`, `cfg=${encodeURIComponent(configToken)}`, {
-            headers: { 
-                ...headers, 
-                "Accept": "application/json, text/javascript, */*; q=0.01",
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", 
-                "X-Requested-With": "XMLHttpRequest", 
-                "Origin": MAIN_URL, 
-                "Referer": url, 
-                "Cookie": cookies 
-            }
+            headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest", "Origin": MAIN_URL, "Referer": url, "Cookie": cookies }
         });
 
-        let configData = res2.data;
-        if (typeof configData === 'string') {
-            try { configData = JSON.parse(configData); } 
-            catch(err) { return res.json({ success: false, message: "Site HTML döndürdü." }); }
-        }
+        let configData = typeof res2.data === 'string' ? JSON.parse(res2.data) : res2.data;
+        let embedUrlRaw = (configData.config && configData.config.v) ? configData.config.v : configData.v;
 
-        let embedUrlRaw = null;
-        if (configData.config && configData.config.v) {
-            embedUrlRaw = configData.config.v;
-        } else if (configData.v) {
-            embedUrlRaw = configData.v;
-        }
-
-        if (!embedUrlRaw) {
-            return res.json({ success: false, message: `Embed linki yapısı değişmiş.` });
-        }
+        if (!embedUrlRaw) return res.json({ success: false, message: `Embed alınamadı.` });
 
         let embedUrl = embedUrlRaw.replace(/\\\//g, '/');
         if (!embedUrl.startsWith('http')) embedUrl = `https:${embedUrl}`;
 
-        // 3. Videoyu Çöz
         if (embedUrl.includes('imagestoo')) {
             const videoId = embedUrl.split('/').pop();
             const res3 = await axios.post(`https://imagestoo.com/player/index.php?data=${videoId}&do=getVideo`, "", { 
                 headers: { "User-Agent": headers["User-Agent"], "X-Requested-With": "XMLHttpRequest", "Referer": embedUrl }
             });
             const sourceMatch = res3.data.match(/"securedLink"\s*:\s*"([^"]+)"/);
-            if (sourceMatch) {
-                // REFERER EKLENDİ
-                return res.json({ success: true, m3u8: sourceMatch[1].replace(/\\\//g, '/'), referer: embedUrl });
-            } else {
-                return res.json({ success: false, message: "Imagestoo linki bulunamadı." });
-            }
+            if (sourceMatch) return res.json({ success: true, m3u8: sourceMatch[1].replace(/\\\//g, '/'), referer: embedUrl });
         } else {
             const res4 = await axios.get(embedUrl, { headers: { "User-Agent": headers["User-Agent"], "Referer": url } });
             const m3u8Match = res4.data.match(/file\s*:\s*["']([^"']+\.m3u8.*?)["']/);
-            if (m3u8Match) {
-                // REFERER EKLENDİ
-                return res.json({ success: true, m3u8: m3u8Match[1], referer: embedUrl });
-            } else {
-                return res.json({ success: false, message: `M3U8 bulunamadı. Sunucu: ${embedUrl}` });
-            }
+            if (m3u8Match) return res.json({ success: true, m3u8: m3u8Match[1], referer: embedUrl });
         }
-    } catch (e) { res.status(500).json({ success: false, message: "Sunucu hatası: " + e.message }); }
+        res.json({ success: false });
+    } catch (e) { res.status(500).json({ success: false }); }
+});
+
+// YENİ: NGINX 403'ü atlatmak için M3U8 dosyalarını Vercel üzerinden proxy yapar
+app.get('/api/proxy_m3u8', async (req, res) => {
+    try {
+        const m3u8Url = req.query.url;
+        const referer = req.query.referer;
+        const response = await axios.get(m3u8Url, {
+            headers: { "Referer": referer || MAIN_URL, "User-Agent": headers["User-Agent"], "Accept": "*/*" }
+        });
+        
+        const baseUrl = new URL(m3u8Url);
+        const rewritten = response.data.split('\n').map(line => {
+            let trimmed = line.trim();
+            if (trimmed.startsWith('#') || trimmed === '') return line;
+            
+            const targetUrl = new URL(trimmed, baseUrl).href;
+            if (targetUrl.includes('.m3u8')) {
+                return `/api/proxy_m3u8?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}`;
+            } else {
+                return targetUrl;
+            }
+        }).join('\n');
+        
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.send(rewritten);
+    } catch (e) { res.status(500).send("M3U8 Hata"); }
+});
+
+// YENİ: "Embed Restricted" hatasını kırmak için HTML'i çeker ve yetkilendirir
+app.get('/api/embed_proxy', async (req, res) => {
+    try {
+        const response = await axios.get(req.query.url, { headers: { "Referer": MAIN_URL, "User-Agent": headers["User-Agent"] }});
+        let html = response.data;
+        // Sayfa kaynaklarını bozmamak için base url ekle
+        html = html.replace('<head>', `<head><base href="${new URL(req.query.url).origin}/">`);
+        res.send(html);
+    } catch (e) { res.status(500).send("Embed Hata"); }
 });
 
 module.exports = app;
