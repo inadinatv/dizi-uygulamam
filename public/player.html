@@ -4,19 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sınırsız Oynatıcı</title>
-    <!-- Referer etiketi video sitelerini bozduğu için KODDAN KALDIRILDI -->
+    <!-- Harici sitelerde Referer sorunu yaşamamak için güvenlik kodu -->
+    <meta name="referrer" content="no-referrer">
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
         body { margin: 0; background: #000; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; overflow: hidden; }
         .btn-back { position: absolute; top: 0; left: 0; width: 100%; padding: 15px; background: #e50914; color: #fff; text-decoration: none; text-align: center; font-weight: bold; z-index: 10; box-sizing: border-box;}
         
         video { width: 100%; height: 100vh; outline: none; background: #000; }
+        
+        /* B PLANINDA ÇALIŞACAK OLAN ÇERÇEVE */
         iframe { width: 100%; height: 100vh; border: none; background: #000; display: none; margin-top: 50px; }
         
         #info { padding: 20px; text-align: center; color: #aaa; z-index: 5; margin-top: 50px;}
-        .alt-btn { display:none; padding:15px; background:#e50914; color:#fff; text-decoration:none; font-weight:bold; border-radius:10px; margin-top:20px; text-align:center; max-width: 90%; word-break: break-all; }
-        
-        .debug-link { font-size: 11px; color: #555; margin-top: 10px; text-align: center; display: none; padding: 0 10px;}
+        .alt-btn { display:none; padding:15px; background:#e50914; color:#fff; text-decoration:none; font-weight:bold; border-radius:10px; margin-top:20px; text-align:center;}
     </style>
 </head>
 <body>
@@ -26,9 +27,7 @@
 
 <video id="video" controls playsinline style="display:none;"></video>
 <iframe id="iframe" allowfullscreen></iframe>
-
 <a id="alt-btn" class="alt-btn" href="#" target="_blank">Eğer açılmazsa Harici Oynatıcıda Aç</a>
-<div id="debug-link" class="debug-link"></div>
 
 <script>
 async function initPlayer() {
@@ -36,7 +35,6 @@ async function initPlayer() {
     const video = document.getElementById('video');
     const iframe = document.getElementById('iframe');
     const altBtn = document.getElementById('alt-btn');
-    const debugLink = document.getElementById('debug-link');
     const url = new URLSearchParams(window.location.search).get('url');
     
     try {
@@ -44,6 +42,7 @@ async function initPlayer() {
         const data = await res.json();
         
         if(data.success) {
+            // A PLANI: Vercel üzerinden temiz şekilde oynat
             info.style.display = 'none';
             const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(data.m3u8)}&referer=${encodeURIComponent(data.referer)}`;
             video.style.display = 'block';
@@ -59,19 +58,17 @@ async function initPlayer() {
             }
         } 
         else if (data.fallback) {
+            // B PLANI: 403 veya farklı bir engelle karşılaşıldığında devreye girer
             info.style.display = 'none';
             video.style.display = 'none';
             
+            // Telefonun IP'sini kullanarak sitenin orijinal gömülü oynatıcısını açar
             iframe.style.display = 'block';
             iframe.src = data.fallback;
             
+            // AppCreator24'te iframe engellenirse diye dev buton
             altBtn.style.display = 'block';
             altBtn.href = data.fallback;
-
-            // Arka planda Vercel'in bulduğu o bozuk/sağlam linki ekrana yazdırır. 
-            // Eğer tekrar 404 alırsan bu linke bakarak asıl sorunu çözebiliriz!
-            debugLink.style.display = 'block';
-            debugLink.innerText = "Kaynak Linki: " + data.fallback;
         } 
         else { 
             info.innerText = 'Hata: ' + (data.message || 'Bulunamadı'); 
