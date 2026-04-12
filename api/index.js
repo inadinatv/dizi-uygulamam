@@ -98,11 +98,25 @@ app.get('/api/video', async (req, res) => {
         if (!embedUrlRaw) embedUrlRaw = $('#videoContainer iframe').attr('data-src') || $('#videoContainer iframe').attr('src') || $('iframe').attr('src');
         if (!embedUrlRaw) return res.json({ success: false, message: `Video embed kaynağı bulunamadı.` });
 
+        // BURASI GÜNCELLENDİ: BOZUK (404 VEREN) LİNKLERİ ONARMA ALGORİTMASI
         let embedUrl = embedUrlRaw.replace(/\\\//g, '/');
-        if (embedUrl.startsWith('//')) embedUrl = `https:${embedUrl}`;
-        else if (!embedUrl.startsWith('http')) embedUrl = `https://${embedUrl}`;
+        try {
+            if (embedUrl.startsWith('//')) {
+                embedUrl = `https:${embedUrl}`;
+            } else if (!embedUrl.startsWith('http')) {
+                if (embedUrl.startsWith('/')) {
+                    // Site görece (relative) bir link verdiyse (Örn: /embed/123) başını ana siteyle doldur
+                    const originObj = new URL(url);
+                    embedUrl = originObj.origin + embedUrl;
+                } else {
+                    embedUrl = `https://${embedUrl}`;
+                }
+            }
+        } catch(err) {
+            embedUrl = embedUrlRaw; // Her şey patlarsa orijinali bırak
+        }
 
-        // BURADA 403 HATASINI YAKALIYORUZ! (B Planı Devrede)
+        // Vercel 403 hatası alıp çökmesin diye Try-Catch blogu
         try {
             if (embedUrl.includes('imagestoo')) {
                 const videoId = embedUrl.split('/').pop();
@@ -118,10 +132,8 @@ app.get('/api/video', async (req, res) => {
                 let mp4Match = res4.data.match(/(?:file|src|source)\s*[:=]\s*["']([^"']+\.mp4[^"']*)["']/i);
                 if (mp4Match) return res.json({ success: true, m3u8: mp4Match[1].replace(/\\\//g, '/'), referer: embedUrl });
             }
-            // M3U8 yoksa bile B Planını Gönder
             return res.json({ success: false, fallback: embedUrl, message: "M3U8 bulunamadı." });
         } catch (innerError) {
-            // SUNUCU 403 VERİRSE ÇÖKMESİN DİYE YAKALIYOR VE TELEFONA GÖNDERİYORUZ
             return res.json({ success: false, fallback: embedUrl, message: "Sunucu erişimi reddetti (403)." });
         }
     } catch (e) { res.status(500).json({ success: false, message: "Sunucu hatası: " + e.message }); }
