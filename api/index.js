@@ -13,7 +13,6 @@ const headers = {
     "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
 };
 
-// --- DİZİLER VE BÖLÜMLERİ ÇEKME İŞLEMLERİ ---
 app.get('/api/category', async (req, res) => {
     try {
         const id = req.query.id || "diziler";
@@ -56,21 +55,32 @@ app.get('/api/search', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
+// BURASI GÜNCELLENDİ: FİLMLER İÇİN OTOMATİK "TEK PARÇA" BUTONU OLUŞTURUR
 app.get('/api/episodes', async (req, res) => {
     try {
-        const response = await axios.get(req.query.url, { headers });
+        const url = req.query.url;
+        const response = await axios.get(url, { headers });
         const $ = cheerio.load(response.data);
         let episodes =[];
+        
         $('div.detail-episode-item-wrap').each((i, el) => {
             const epName = $(el).find('div.detail-episode-title').text().trim();
             const epSubtitle = $(el).find('div.detail-episode-subtitle').text().trim();
             const link = $(el).find('a.detail-episode-item').attr('href');
             if (link) episodes.push({ name: `${epSubtitle} - ${epName}`, link });
         });
+
+        // Eğer bölüm bulunamadıysa, bu bir FİLMDİR! O zaman filmin kendi sayfasını video linki olarak atıyoruz.
+        if (episodes.length === 0) {
+            const movieTitle = $('h1').text().trim() || "Filmi İzle";
+            episodes.push({ name: `🎬 ${movieTitle} (Tek Parça)`, link: url });
+        }
+
         res.json({ success: true, data: episodes });
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
+// BURASI GÜNCELLENDİ: BULUNAMAYAN VİDEOLAR İÇİN GELİŞMİŞ TARAYICI EKLENDİ
 app.get('/api/video', async (req, res) => {
     try {
         const url = req.query.url;
@@ -79,34 +89,61 @@ app.get('/api/video', async (req, res) => {
         const configToken = $('#videoContainer').attr('data-cfg');
         
         let cookies = res1.headers['set-cookie'] ? res1.headers['set-cookie'].map(c => c.split(';')[0]).join('; ') : "";
-        if (!configToken) return res.json({ success: false, message: "Sayfa koruması geçilemedi." });
+        let embedUrlRaw = null;
 
-        const res2 = await axios.post(`${MAIN_URL}/ajax-player-config`, `cfg=${encodeURIComponent(configToken)}`, {
-            headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest", "Origin": MAIN_URL, "Referer": url, "Cookie": cookies }
-        });
+        // EĞER SİSTEM TOKEN KULLANIYORSA
+        if (configToken) {
+            const res2 = await axios.post(`${MAIN_URL}/ajax-player-config`, `cfg=${encodeURIComponent(configToken)}`, {
+                headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest", "Origin": MAIN_URL, "Referer": url, "Cookie": cookies }
+            });
+            let configData = typeof res2.data === 'string' ? JSON.parse(res2.data) : res2.data;
+            embedUrlRaw = (configData.config && configData.config.v) ? configData.config.v : configData.v;
+        }
 
-        let configData = typeof res2.data === 'string' ? JSON.parse(res2.data) : res2.data;
-        let embedUrlRaw = (configData.config && configData.config.v) ? configData.config.v : configData.v;
-        if (!embedUrlRaw) return res.json({ success: false, message: `Embed alınamadı.` });
+        // EĞER TOKEN YOKSA, VİDEO DİREKT İFRAME OLARAK GÖMÜLMÜŞ OLABİLİR (Kaçak maçlar veya eski filmler gibi)
+        if (!embedUrlRaw) {
+            embedUrlRaw = $('#videoContainer iframe').attr('data-src') || $('#videoContainer iframe').attr('src') || $('iframe').attr('src');
+        }
 
+        if (!embedUrlRaw) return res.json({ success: false, message: `Video embed kaynağı sayfada bulunamadı.` });
+
+        // URL formatını düzelt
         let embedUrl = embedUrlRaw.replace(/\\\//g, '/');
-        if (!embedUrl.startsWith('http')) embedUrl = `https:${embedUrl}`;
+        if (embedUrl.startsWith('//')) embedUrl = `https:${embedUrl}`;
+        else if (!embedUrl.startsWith('http')) embedUrl = `https://${embedUrl}`;
 
+        // 1. İHTİMAL: İMAGESTOO VİDEO SAĞLAYICISI
         if (embedUrl.includes('imagestoo')) {
             const videoId = embedUrl.split('/').pop();
             const res3 = await axios.post(`https://imagestoo.com/player/index.php?data=${videoId}&do=getVideo`, "", { headers: { "User-Agent": headers["User-Agent"], "X-Requested-With": "XMLHttpRequest", "Referer": embedUrl } });
             const sourceMatch = res3.data.match(/"securedLink"\s*:\s*"([^"]+)"/);
             if (sourceMatch) return res.json({ success: true, m3u8: sourceMatch[1].replace(/\\\//g, '/'), referer: embedUrl });
-        } else {
+        } 
+        // 2. İHTİMAL: STANDART VEYA FARKLI KAYNAK
+        else {
             const res4 = await axios.get(embedUrl, { headers: { "User-Agent": headers["User-Agent"], "Referer": url } });
-            const m3u8Match = res4.data.match(/file\s*:\s*["']([^"']+\.m3u8.*?)["']/);
-            if (m3u8Match) return res.json({ success: true, m3u8: m3u8Match[1], referer: embedUrl });
+            
+            // Regex ile sadece file:"" değil, src:"" veya direkt .m3u8 linklerini her yerden avla
+            let m3u8Match = res4.data.match(/(?:file|src|source)\s*[:=]\s*["']([^"']+\.m3u8[^"']*)["']/i);
+            
+            if (!m3u8Match) { // Eğer JSON/Javascript içinde değilse tüm kodun içinde saf linki ara
+                m3u8Match = res4.data.match(/(https?:\/\/[^"']+\.m3u8[^"']*)/i);
+            }
+
+            if (m3u8Match) {
+                return res.json({ success: true, m3u8: m3u8Match[1].replace(/\\\//g, '/'), referer: embedUrl });
+            } else {
+                // Eğer video m3u8 değil de MP4 ise onu da yakala
+                let mp4Match = res4.data.match(/(?:file|src|source)\s*[:=]\s*["']([^"']+\.mp4[^"']*)["']/i);
+                if (mp4Match) {
+                    return res.json({ success: true, m3u8: mp4Match[1].replace(/\\\//g, '/'), referer: embedUrl });
+                }
+            }
         }
-        res.json({ success: false });
-    } catch (e) { res.status(500).json({ success: false }); }
+        res.json({ success: false, message: "M3U8 veya MP4 linki okunamadı." });
+    } catch (e) { res.status(500).json({ success: false, message: "Sunucu hatası: " + e.message }); }
 });
 
-// --- EN GELİŞMİŞ VİDEO PROXY SİSTEMİ (AES-128 ŞİFRE ÇÖZÜCÜ EKLENDİ) ---
 app.get('/api/proxy_m3u8', async (req, res) => {
     try {
         const m3u8Url = req.query.url;
@@ -121,27 +158,20 @@ app.get('/api/proxy_m3u8', async (req, res) => {
             let trimmed = line.trim();
             if (trimmed === '') return line;
             
-            // BURASI YENİ: AES-128 Şifre Anahtarlarını ve Ses/Altyazı Dosyalarını Vercel'e Bağlar
             if (trimmed.startsWith('#EXT')) {
                 return trimmed.replace(/URI="([^"]+)"/g, (match, p1) => {
-                    if (p1.startsWith('data:')) return match; // Base64 ise elleme
+                    if (p1.startsWith('data:')) return match; 
                     const targetUrl = new URL(p1, baseUrl).href;
-                    if (targetUrl.includes('.m3u8')) {
-                        return `URI="/api/proxy_m3u8?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}"`;
-                    } else {
-                        return `URI="/api/proxy_ts?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}"`;
-                    }
+                    if (targetUrl.includes('.m3u8')) return `URI="/api/proxy_m3u8?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}"`;
+                    else return `URI="/api/proxy_ts?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}"`;
                 });
             }
             
             if (trimmed.startsWith('#')) return line;
             
             const targetUrl = new URL(trimmed, baseUrl).href;
-            if (targetUrl.includes('.m3u8')) {
-                return `/api/proxy_m3u8?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}`;
-            } else {
-                return `/api/proxy_ts?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}`;
-            }
+            if (targetUrl.includes('.m3u8')) return `/api/proxy_m3u8?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}`;
+            else return `/api/proxy_ts?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}`;
         }).join('\n');
         
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
@@ -160,7 +190,6 @@ app.get('/api/proxy_ts', async (req, res) => {
             headers: { "Referer": referer, "User-Agent": headers["User-Agent"], "Accept": "*/*" }
         });
 
-        // Sadece MP2T video formatı değil, Şifre Dosyası da (.bin) gelebilir. Karşı sitenin formatını yansıtıyoruz.
         const contentType = response.headers['content-type'] || 'application/octet-stream';
         res.setHeader('Content-Type', contentType);
         res.setHeader('Access-Control-Allow-Origin', '*');
