@@ -76,19 +76,17 @@ app.get('/api/video', async (req, res) => {
         const $ = cheerio.load(res1.data);
         const configToken = $('#videoContainer').attr('data-cfg');
         
-        let cookies = res1.headers['set-cookie'] ? res1.headers['set-cookie'].map(c => c.split(';')[0]).join('; ') : "";
         let embedUrlRaw = null;
-
         if (configToken) {
             const res2 = await axios.post(`${MAIN_URL}/ajax-player-config`, `cfg=${encodeURIComponent(configToken)}`, {
-                headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest", "Origin": MAIN_URL, "Referer": url, "Cookie": cookies }
+                headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest", "Origin": MAIN_URL, "Referer": url }
             });
             let configData = typeof res2.data === 'string' ? JSON.parse(res2.data) : res2.data;
             embedUrlRaw = (configData.config && configData.config.v) ? configData.config.v : configData.v;
         }
 
         if (!embedUrlRaw) embedUrlRaw = $('#videoContainer iframe').attr('data-src') || $('#videoContainer iframe').attr('src') || $('iframe').attr('src');
-        if (!embedUrlRaw) return res.json({ success: false, originalUrl: url, message: `Video bulunamadı.` });
+        if (!embedUrlRaw) return res.json({ success: false, fallback: "", originalUrl: url });
 
         let embedUrl = embedUrlRaw.replace(/\\\//g, '/').replace(/['"]/g, '').trim();
         try {
@@ -97,37 +95,53 @@ app.get('/api/video', async (req, res) => {
         } catch(err) { embedUrl = embedUrlRaw; }
 
         try {
-            // A PLANI: VERCEL SUNUCUSU
-            if (embedUrl.includes('imagestoo')) {
-                const videoId = embedUrl.split('/').pop();
-                try {
-                    // API Kandırmacası için "hash=" body'si eklendi
-                    const res3 = await axios.post(`https://imagestoo.com/player/index.php?data=${videoId}&do=getVideo`, "hash=", { 
-                        headers: { "User-Agent": headers["User-Agent"], "X-Requested-With": "XMLHttpRequest", "Content-Type": "application/x-www-form-urlencoded", "Referer": embedUrl } 
-                    });
-                    const sourceMatch = res3.data.match(/"securedLink"\s*:\s*"([^"]+)"/);
-                    if (sourceMatch) return res.json({ success: true, m3u8: sourceMatch[1].replace(/\\\//g, '/'), referer: embedUrl });
-                } catch(e) {} 
-                
-                // Vercel 403 yerse 404 hatası vermek yerine telefona "Sen dene" diyoruz!
-                return res.json({ success: false, isImagestoo: true, videoId: videoId, embedUrl: embedUrl, originalUrl: url });
-            } 
-            else {
-                const res4 = await axios.get(embedUrl, { headers: { "User-Agent": headers["User-Agent"], "Referer": url } });
-                let m3u8Match = res4.data.match(/(?:file|src|source)\s*[:=]\s*["']([^"']+\.m3u8[^"']*)["']/i) || res4.data.match(/(https?:\/\/[^"']+\.m3u8[^"']*)/i);
-                if (m3u8Match) return res.json({ success: true, m3u8: m3u8Match[1].replace(/\\\//g, '/'), referer: embedUrl });
-                
-                let mp4Match = res4.data.match(/(?:file|src|source)\s*[:=]\s*["']([^"']+\.mp4[^"']*)["']/i);
-                if (mp4Match) return res.json({ success: true, m3u8: mp4Match[1].replace(/\\\//g, '/'), referer: embedUrl });
-            }
-            return res.json({ success: false, originalUrl: url, message: "M3U8 bulunamadı." });
+            const res4 = await axios.get(embedUrl, { headers: { "User-Agent": headers["User-Agent"], "Referer": url } });
+            
+            // GELİŞMİŞ RADAR: Her türlü m3u8 linkini nerede saklanırsa saklansın bulur
+            let m3u8Match = res4.data.match(/(https?:\/\/[^\s"'<>`]+?\.m3u8[^\s"'<>`]*)/i);
+            if (m3u8Match) return res.json({ success: true, m3u8: m3u8Match[1].replace(/\\\//g, '/'), referer: embedUrl });
+            
+            let mp4Match = res4.data.match(/(https?:\/\/[^\s"'<>`]+?\.mp4[^\s"'<>`]*)/i);
+            if (mp4Match) return res.json({ success: true, m3u8: mp4Match[1].replace(/\\\//g, '/'), referer: embedUrl });
+
+            return res.json({ success: false, fallback: embedUrl, originalUrl: url });
         } catch (innerError) {
-            return res.json({ success: false, originalUrl: url, message: "Sunucu erişimi reddetti." });
+            // M3U8 çıkaramazsa bile doğruca İframe koduna gönder!
+            return res.json({ success: false, fallback: embedUrl, originalUrl: url });
         }
-    } catch (e) { res.status(500).json({ success: false, originalUrl: req.query.url, message: "Sunucu hatası." }); }
+    } catch (e) { res.status(500).json({ success: false, originalUrl: req.query.url }); }
 });
 
-// PROXY SISTEMLERI
+// YENİ: KISITLAMA KALDIRICI İFRAME PROXY
+app.get('/api/embed_player', async (req, res) => {
+    try {
+        const url = req.query.url;
+        const referer = req.query.referer || MAIN_URL;
+        
+        // Vercel, videonun asıl sayfasına "Ben Dizipalım" diyerek giriyor
+        const response = await axios.get(url, {
+            headers: { "User-Agent": headers["User-Agent"], "Referer": referer, "Accept": "*/*" }
+        });
+        
+        let html = response.data;
+        
+        // 1. KISITLAMA KALDIRMA: "Embed Restricted" kontrolü yapan kodları yok ediyoruz!
+        html = html.replace(/window\.top/g, "window.self");
+        html = html.replace(/window\.parent/g, "window.self");
+        html = html.replace(/top\.location/g, "self.location");
+        
+        // 2. KAYNAK ONARMA: İçerideki dosyaların düzgün yüklenmesi için Base etiketi
+        const origin = new URL(url).origin;
+        html = html.replace('<head>', `<head><base href="${origin}/">`);
+        
+        res.send(html);
+    } catch (e) {
+        // Eğer Vercel bu embed sayfasına girişte Cloudflare banı yerse, 
+        // HTML'yi direkt sunmak yerine telefonu yönlendirir
+        res.redirect(req.query.url);
+    }
+});
+
 app.get('/api/proxy_m3u8', async (req, res) => {
     try {
         const m3u8Url = req.query.url;
