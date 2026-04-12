@@ -85,13 +85,13 @@ app.get('/api/video', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
-// YENİ: NGINX 403'ü atlatmak için M3U8 dosyalarını Vercel üzerinden proxy yapar
+// ANA DOSYAYI PROXY'LER
 app.get('/api/proxy_m3u8', async (req, res) => {
     try {
         const m3u8Url = req.query.url;
         const referer = req.query.referer;
         const response = await axios.get(m3u8Url, {
-            headers: { "Referer": referer || MAIN_URL, "User-Agent": headers["User-Agent"], "Accept": "*/*" }
+            headers: { "Referer": referer || MAIN_URL, "User-Agent": headers["User-Agent"] }
         });
         
         const baseUrl = new URL(m3u8Url);
@@ -101,9 +101,11 @@ app.get('/api/proxy_m3u8', async (req, res) => {
             
             const targetUrl = new URL(trimmed, baseUrl).href;
             if (targetUrl.includes('.m3u8')) {
+                // Alt m3u8 dosyalarını proxy'e yönlendir
                 return `/api/proxy_m3u8?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}`;
             } else {
-                return targetUrl;
+                // VİDEO PARÇALARINI DA (.ts) PROXY'E YÖNLENDİR! (Siyah ekranı çözen satır)
+                return `/api/proxy_ts?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}`;
             }
         }).join('\n');
         
@@ -113,15 +115,21 @@ app.get('/api/proxy_m3u8', async (req, res) => {
     } catch (e) { res.status(500).send("M3U8 Hata"); }
 });
 
-// YENİ: "Embed Restricted" hatasını kırmak için HTML'i çeker ve yetkilendirir
-app.get('/api/embed_proxy', async (req, res) => {
+// VİDEO PARÇACIKLARINI (.ts) VERCEL ÜZERİNDEN AKITIR
+app.get('/api/proxy_ts', async (req, res) => {
     try {
-        const response = await axios.get(req.query.url, { headers: { "Referer": MAIN_URL, "User-Agent": headers["User-Agent"] }});
-        let html = response.data;
-        // Sayfa kaynaklarını bozmamak için base url ekle
-        html = html.replace('<head>', `<head><base href="${new URL(req.query.url).origin}/">`);
-        res.send(html);
-    } catch (e) { res.status(500).send("Embed Hata"); }
+        const tsUrl = req.query.url;
+        const referer = req.query.referer;
+        
+        const response = await axios.get(tsUrl, {
+            responseType: 'stream', // Videoyu ram'de tutmadan direkt telefona akıtır
+            headers: { "Referer": referer || MAIN_URL, "User-Agent": headers["User-Agent"] }
+        });
+
+        res.setHeader('Content-Type', 'video/MP2T');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        response.data.pipe(res);
+    } catch (e) { res.status(500).send("TS Hata"); }
 });
 
 module.exports = app;
