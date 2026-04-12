@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sınırsız Oynatıcı</title>
-    <!-- Referer etiketi video sitelerini bozduğu için KODDAN KALDIRILDI -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
         body { margin: 0; background: #000; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; overflow: hidden; }
@@ -45,7 +44,10 @@ async function initPlayer() {
         
         if(data.success) {
             info.style.display = 'none';
-            const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(data.m3u8)}&referer=${encodeURIComponent(data.referer)}`;
+            
+            // Çerez parametresi proxy linkine eklendi
+            const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(data.m3u8)}&referer=${encodeURIComponent(data.referer)}&cookie=${encodeURIComponent(data.cookie || '')}`;
+            
             video.style.display = 'block';
             
             if(Hls.isSupported()){ 
@@ -68,8 +70,6 @@ async function initPlayer() {
             altBtn.style.display = 'block';
             altBtn.href = data.fallback;
 
-            // Arka planda Vercel'in bulduğu o bozuk/sağlam linki ekrana yazdırır. 
-            // Eğer tekrar 404 alırsan bu linke bakarak asıl sorunu çözebiliriz!
             debugLink.style.display = 'block';
             debugLink.innerText = "Kaynak Linki: " + data.fallback;
         } 
