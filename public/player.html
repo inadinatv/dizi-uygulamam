@@ -9,9 +9,7 @@
         body { margin: 0; background: #000; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; overflow: hidden; }
         .btn-back { position: absolute; top: 0; left: 0; width: 100%; padding: 15px; background: #e50914; color: #fff; text-decoration: none; text-align: center; font-weight: bold; z-index: 10; box-sizing: border-box;}
         video { width: 100%; height: 100vh; outline: none; background: #000; }
-        iframe { width: 100%; height: 100vh; border: none; background: #000; display: none; margin-top: 50px;}
         #info { padding: 20px; text-align: center; color: #aaa; z-index: 5; margin-top: 50px; line-height: 1.6;}
-        .alt-btn { display:none; padding:15px; background:#333; color:#fff; text-decoration:none; font-weight:bold; border-radius:10px; margin-top:10px; text-align:center; max-width: 90%; }
     </style>
 </head>
 <body>
@@ -19,15 +17,11 @@
 <a href="#" onclick="history.back()" class="btn-back">⬅ Bölümlere Dön</a>
 <h3 id="info">Bağlantı Kuruluyor... ⏳</h3>
 <video id="video" controls playsinline style="display:none;"></video>
-<iframe id="iframe" allowfullscreen></iframe>
-<a id="alt-btn" class="alt-btn" href="#" target="_blank">Harici Oynatıcıda Aç (Yedek)</a>
 
 <script>
 async function initPlayer() {
     const info = document.getElementById('info');
     const video = document.getElementById('video');
-    const iframe = document.getElementById('iframe');
-    const altBtn = document.getElementById('alt-btn');
     const url = new URLSearchParams(window.location.search).get('url');
     
     try {
@@ -35,15 +29,10 @@ async function initPlayer() {
         const data = await res.json();
         
         if(data.success) {
+            // A PLANI BAŞARILI: M3u8 Linkini Dahili Oynatıcıda (Video Tag) açar.
             info.style.display = 'none';
-            // ExoPlayer Pipe Taktiği
-            const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
             const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(data.m3u8)}&referer=${encodeURIComponent(data.referer)}`;
             
-            altBtn.style.display = 'block';
-            altBtn.href = data.m3u8 + "|Referer=" + data.referer + "&User-Agent=" + userAgent;
-            altBtn.innerText = "🎬 ExoPlayer ile İzle (Full Kalite)";
-
             video.style.display = 'block';
             if(Hls.isSupported()){ 
                 const hls = new Hls({ maxBufferSize: 20 * 1000 * 1000 }); 
@@ -51,19 +40,27 @@ async function initPlayer() {
                 hls.attachMedia(video); 
                 hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
             } else if(video.canPlayType('application/vnd.apple.mpegurl')) { 
-                video.src = proxyUrl; video.play(); 
+                video.src = proxyUrl; 
+                video.play(); 
             }
         } 
         else if(data.fallback) {
-            info.style.display = 'none';
-            iframe.style.display = 'block';
-            iframe.src = `/api/embed_player?url=${encodeURIComponent(data.fallback)}`;
-            altBtn.style.display = 'block';
-            altBtn.href = data.fallback;
-            altBtn.innerText = "🌐 Harici Tarayıcıda Aç";
+            // B PLANI BAŞARILI: Vercel M3U8 çekemezse, İframe (siyah ekran) kullanmak YERİNE,
+            // Doğrudan videonun kendi temiz sayfasına (Örn: Imagestoo izleme ekranına) yönlendirir.
+            info.innerHTML = "Özel Video Kaynağına Bağlanıyor... 🍿";
+            
+            setTimeout(() => {
+                // replace komutu, kullanıcı geri tuşuna bastığında tekrar
+                // player.html sayfasına düşüp döngüye girmesini engeller!
+                window.location.replace(data.fallback);
+            }, 1000);
         }
-        else { info.innerText = 'Video Bulunamadı!'; }
-    } catch(e) { info.innerText = 'Sunucu Hatası!'; }
+        else { 
+            info.innerText = 'Video Kaynağı Bulunamadı!'; 
+        }
+    } catch(e) { 
+        info.innerText = 'Sunucu Hatası!'; 
+    }
 }
 initPlayer();
 </script>
