@@ -18,25 +18,21 @@ app.get('/api/category', async (req, res) => {
         const id = req.query.id || "diziler";
         const type = req.query.type || "main";
         const page = parseInt(req.query.page) || 1;
-
         let targetUrl = MAIN_URL;
         if (type === "platform") targetUrl += `/platform/${id}`;
         else if (type === "kategori") targetUrl += `/kategori/${id}`;
         else targetUrl += `/${id}`;
-
         if (page > 1) targetUrl += `/page/${page}`;
 
         const response = await axios.get(targetUrl, { headers });
         const $ = cheerio.load(response.data);
         let series =[];
-        
         $('ul.content-grid > li').each((i, el) => {
             const title = $(el).find('div.card-info h3').text().trim();
             const link = $(el).find('a').attr('href');
             const poster = $(el).find('img').attr('data-src') || $(el).find('img').attr('src');
             if (title && link) series.push({ title, link, poster });
         });
-        
         res.json({ success: true, data: series });
     } catch (e) { res.status(500).json({ success: false }); }
 });
@@ -61,14 +57,12 @@ app.get('/api/episodes', async (req, res) => {
         const response = await axios.get(url, { headers });
         const $ = cheerio.load(response.data);
         let episodes =[];
-        
         $('div.detail-episode-item-wrap').each((i, el) => {
             const epName = $(el).find('div.detail-episode-title').text().trim();
             const epSubtitle = $(el).find('div.detail-episode-subtitle').text().trim();
             const link = $(el).find('a.detail-episode-item').attr('href');
             if (link) episodes.push({ name: `${epSubtitle} - ${epName}`, link });
         });
-
         if (episodes.length === 0) {
             const movieTitle = $('h1').text().trim() || "Filmi İzle";
             episodes.push({ name: `🎬 ${movieTitle} (Tek Parça)`, link: url });
@@ -98,14 +92,14 @@ app.get('/api/video', async (req, res) => {
         if (!embedUrlRaw) embedUrlRaw = $('#videoContainer iframe').attr('data-src') || $('#videoContainer iframe').attr('src') || $('iframe').attr('src');
         if (!embedUrlRaw) return res.json({ success: false, message: `Video embed kaynağı bulunamadı.` });
 
-        // BURASI GÜNCELLENDİ: BOZUK (404 VEREN) LİNKLERİ ONARMA ALGORİTMASI
-        let embedUrl = embedUrlRaw.replace(/\\\//g, '/');
+        // BURASI ÖNEMLİ: Linki boşluklardan ve gizli tırnak işaretlerinden arındırıyoruz!
+        let embedUrl = embedUrlRaw.replace(/\\\//g, '/').replace(/['"]/g, '').trim();
+        
         try {
             if (embedUrl.startsWith('//')) {
                 embedUrl = `https:${embedUrl}`;
             } else if (!embedUrl.startsWith('http')) {
                 if (embedUrl.startsWith('/')) {
-                    // Site görece (relative) bir link verdiyse (Örn: /embed/123) başını ana siteyle doldur
                     const originObj = new URL(url);
                     embedUrl = originObj.origin + embedUrl;
                 } else {
@@ -113,10 +107,9 @@ app.get('/api/video', async (req, res) => {
                 }
             }
         } catch(err) {
-            embedUrl = embedUrlRaw; // Her şey patlarsa orijinali bırak
+            embedUrl = embedUrlRaw;
         }
 
-        // Vercel 403 hatası alıp çökmesin diye Try-Catch blogu
         try {
             if (embedUrl.includes('imagestoo')) {
                 const videoId = embedUrl.split('/').pop();
@@ -143,7 +136,6 @@ app.get('/api/proxy_m3u8', async (req, res) => {
     try {
         const m3u8Url = req.query.url;
         const referer = (req.query.referer && req.query.referer !== 'undefined') ? req.query.referer : MAIN_URL;
-        
         const response = await axios.get(m3u8Url, { headers: { "Referer": referer, "User-Agent": headers["User-Agent"], "Accept": "*/*" }});
         const baseUrl = new URL(m3u8Url);
         const rewritten = response.data.split('\n').map(line => {
