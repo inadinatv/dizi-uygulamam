@@ -9,10 +9,7 @@
         body { margin: 0; background: #000; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; overflow: hidden; }
         .btn-back { position: absolute; top: 0; left: 0; width: 100%; padding: 15px; background: #e50914; color: #fff; text-decoration: none; text-align: center; font-weight: bold; z-index: 10; box-sizing: border-box;}
         video { width: 100%; height: 100vh; outline: none; background: #000; }
-        
-        /* ÇERÇEVE EKRANI KAPLAYACAK */
         iframe { width: 100%; height: 100vh; border: none; background: #000; display: none; margin-top: 50px;}
-        
         #info { padding: 20px; text-align: center; color: #aaa; z-index: 5; margin-top: 50px; line-height: 1.6;}
     </style>
 </head>
@@ -20,8 +17,8 @@
 
 <a href="#" onclick="history.back()" class="btn-back">⬅ Bölümlere Dön</a>
 <h3 id="info">Video Kaynağı Yükleniyor... ⏳</h3>
-<video id="video" controls playsinline style="display:none;"></video>
 
+<video id="video" controls playsinline style="display:none;"></video>
 <!-- B Planı Çerçevesi -->
 <iframe id="iframe" allowfullscreen></iframe>
 
@@ -37,9 +34,9 @@ async function initPlayer() {
         const data = await res.json();
         
         if(data.success) {
-            // A PLANI (Normal Vercel Çekimi)
+            // A PLANI (Vercel Temiz Çekim)
             info.style.display = 'none';
-            const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(data.m3u8)}&referer=${encodeURIComponent(data.referer)}`;
+            const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(data.m3u8)}&referer=${encodeURIComponent(data.referer)}&cookie=${encodeURIComponent(data.cookie || '')}`;
             video.style.display = 'block';
             
             if(Hls.isSupported()){ 
@@ -53,11 +50,10 @@ async function initPlayer() {
             }
         } 
         else if(data.fallback) {
-            // B PLANI (Kısıtlama Kaldırıcı Iframe Proxy)
-            // Seni Dizipal'e yönlendirmek yerine videonun kendi temizlenmiş player'ını açar!
+            // B PLANI (HTML Ameliyat Masası - Kısıtlama Silici)
             info.style.display = 'none';
             iframe.style.display = 'block';
-            iframe.src = `/api/embed_player?url=${encodeURIComponent(data.fallback)}&referer=${encodeURIComponent(data.originalUrl)}`;
+            iframe.src = `/api/embed_player?url=${encodeURIComponent(data.fallback)}`;
         }
         else {
             info.innerText = 'Video Bulunamadı!';
