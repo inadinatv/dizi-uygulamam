@@ -3,34 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gelişmiş Oynatıcı</title>
+    <title>Sınırsız Oynatıcı</title>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
         body { margin: 0; background: #000; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; overflow: hidden; }
         .btn-back { position: absolute; top: 0; left: 0; width: 100%; padding: 15px; background: #e50914; color: #fff; text-decoration: none; text-align: center; font-weight: bold; z-index: 10; box-sizing: border-box;}
         
         video { width: 100%; height: 100vh; outline: none; background: #000; }
-        iframe { width: 100%; height: 100vh; border: none; display: none; background: #000; }
-        
         #info { padding: 20px; text-align: center; color: #aaa; z-index: 5; margin-top: 50px;}
     </style>
 </head>
 <body>
 
 <a href="#" onclick="history.back()" class="btn-back">⬅ Bölümlere Dön</a>
-<h3 id="info">Güvenlik Aşılıyor... Lütfen Bekleyin ⏳</h3>
+<h3 id="info">Video Parçaları Birleştiriliyor... Bekleyin ⏳</h3>
 
-<!-- Plan A: Kendi Sınırsız Oynatıcımız -->
 <video id="video" controls playsinline style="display:none;"></video>
-
-<!-- Plan B: Kırılmış Embed -->
-<iframe id="iframe-container" allowfullscreen></iframe>
 
 <script>
 async function initPlayer() {
     const info = document.getElementById('info');
     const video = document.getElementById('video');
-    const iframe = document.getElementById('iframe-container');
     const url = new URLSearchParams(window.location.search).get('url');
     
     try {
@@ -40,26 +33,27 @@ async function initPlayer() {
         if(data.success) {
             info.style.display = 'none';
             
-            // A Planı: M3U8 Linkini Vercel üzerinden şifrelenmiş olarak getir
+            // Tüm parçacıkları (.ts ve .m3u8) bizim Vercel'den çekecek o sihirli köprü:
             const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(data.m3u8)}&referer=${encodeURIComponent(data.referer)}`;
             
             video.style.display = 'block';
             
-            // Eğer telefon HLS destekliyorsa (Android Chrome, Webview)
             if(Hls.isSupported()){ 
-                const hls = new Hls(); 
+                const hls = new Hls({
+                    maxBufferSize: 20 * 1000 * 1000 // Kopmaları engellemek için 20MB önbellek
+                }); 
                 hls.loadSource(proxyUrl); 
                 hls.attachMedia(video); 
                 hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
                 
-                // Eğer video CDN tarafından engellenirse B PLANINA GEÇ!
                 hls.on(Hls.Events.ERROR, function (event, errData) {
                     if (errData.fatal) {
-                        video.style.display = 'none';
-                        hls.destroy();
-                        
-                        iframe.style.display = 'block';
-                        iframe.src = `/api/embed_proxy?url=${encodeURIComponent(data.referer)}`;
+                        if(errData.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                            hls.startLoad(); // Ufak bağlantı kopukluğunda yenile
+                        } else {
+                            info.style.display = 'block';
+                            info.innerText = 'Video akışı koptu.';
+                        }
                     }
                 });
             }
@@ -67,12 +61,6 @@ async function initPlayer() {
             else if(video.canPlayType('application/vnd.apple.mpegurl')) { 
                 video.src = proxyUrl; 
                 video.play(); 
-                
-                video.onerror = () => {
-                    video.style.display = 'none';
-                    iframe.style.display = 'block';
-                    iframe.src = `/api/embed_proxy?url=${encodeURIComponent(data.referer)}`;
-                };
             }
         } else { 
             info.innerText = 'Hata: ' + (data.message || 'Bulunamadı'); 
