@@ -22,14 +22,14 @@
 async function initPlayer() {
     const info = document.getElementById('info');
     const video = document.getElementById('video');
-    const url = new URLSearchParams(window.location.search).get('url');
+    const url = newSearchParams(window.location.search).get('url');
     
     try {
         const res = await fetch(`/api/video?url=${encodeURIComponent(url)}`);
         const data = await res.json();
         
         if(data.success) {
-            // A PLANI BAŞARILI: M3u8 Linkini Dahili Oynatıcıda (Video Tag) açar.
+            // NORMAL VİDEOLAR (Şimdi yeniden çalışacak)
             info.style.display = 'none';
             const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(data.m3u8)}&referer=${encodeURIComponent(data.referer)}`;
             
@@ -45,18 +45,18 @@ async function initPlayer() {
             }
         } 
         else if(data.fallback) {
-            // B PLANI BAŞARILI: Vercel M3U8 çekemezse, İframe (siyah ekran) kullanmak YERİNE,
-            // Doğrudan videonun kendi temiz sayfasına (Örn: Imagestoo izleme ekranına) yönlendirir.
-            info.innerHTML = "Özel Video Kaynağına Bağlanıyor... 🍿";
+            // İNATÇI VİDEOLAR (Imagestoo vb.) - 404, Siyah Ekran vb. YOK!
+            // Seni doğrudan tertemiz, engeli olmayan video sayfasına fırlatır.
+            info.innerHTML = "Özel Video Kaynağına Yönlendiriliyor... 🚀";
             
             setTimeout(() => {
-                // replace komutu, kullanıcı geri tuşuna bastığında tekrar
-                // player.html sayfasına düşüp döngüye girmesini engeller!
+                // "replace" komutu sayesinde, videoyu izleyip telefonun "Geri" tuşuna bastığında
+                // sonsuz döngüye girmeden tertemiz bir şekilde uygulamaya dönersin!
                 window.location.replace(data.fallback);
             }, 1000);
         }
         else { 
-            info.innerText = 'Video Kaynağı Bulunamadı!'; 
+            info.innerText = 'Video Bulunamadı: ' + (data.message || ''); 
         }
     } catch(e) { 
         info.innerText = 'Sunucu Hatası!'; 
