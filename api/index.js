@@ -13,33 +13,27 @@ const headers = {
     "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
 };
 
-// 1. DÖNGÜSÜZ SAYFALAMA SİSTEMİ
 app.get('/api/category', async (req, res) => {
     try {
         const id = req.query.id || "diziler";
         const type = req.query.type || "main";
         const page = parseInt(req.query.page) || 1;
-
         let targetUrl = MAIN_URL;
         if (type === "platform") targetUrl += `/platform/${id}`;
         else if (type === "kategori") targetUrl += `/kategori/${id}`;
         else targetUrl += `/${id}`;
-
-        // Link yapısı onarıldı: /diziler/page/2/
         targetUrl = targetUrl.replace(/\/$/, ""); 
         if (page > 1) targetUrl += `/page/${page}/`;
 
         const response = await axios.get(targetUrl, { headers });
         const $ = cheerio.load(response.data);
         let series = [];
-        
         $('ul.content-grid > li').each((i, el) => {
             const title = $(el).find('div.card-info h3').text().trim();
             const link = $(el).find('a').attr('href');
             const poster = $(el).find('img').attr('data-src') || $(el).find('img').attr('src');
             if (title && link) series.push({ title, link, poster });
         });
-        
         res.json({ success: true, data: series });
     } catch (e) { res.status(500).json({ success: false }); }
 });
@@ -82,12 +76,11 @@ app.get('/api/video', async (req, res) => {
         const res1 = await axios.get(url, { headers });
         const $ = cheerio.load(res1.data);
         const configToken = $('#videoContainer').attr('data-cfg');
-        let cookies = res1.headers['set-cookie'] ? res1.headers['set-cookie'].map(c => c.split(';')[0]).join('; ') : "";
         let embedUrlRaw = null;
 
         if (configToken) {
             const res2 = await axios.post(`${MAIN_URL}/ajax-player-config`, `cfg=${encodeURIComponent(configToken)}`, {
-                headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest", "Origin": MAIN_URL, "Referer": url, "Cookie": cookies }
+                headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest", "Origin": MAIN_URL, "Referer": url }
             });
             let configData = typeof res2.data === 'string' ? JSON.parse(res2.data) : res2.data;
             embedUrlRaw = (configData.config && configData.config.v) ? configData.config.v : configData.v;
@@ -108,38 +101,27 @@ app.get('/api/video', async (req, res) => {
         try {
             if (embedUrl.includes('imagestoo')) {
                 const videoId = embedUrl.split('/').pop();
+                // Orijinal gömülü oynatıcı linki oluşturuluyor
+                const fallbackUrl = `https://imagestoo.com/e/${videoId}`;
                 const res3 = await axios.post(`https://imagestoo.com/player/index.php?data=${videoId}&do=getVideo`, "hash=", { 
                     headers: { "User-Agent": headers["User-Agent"], "X-Requested-With": "XMLHttpRequest", "Content-Type": "application/x-www-form-urlencoded", "Referer": embedUrl } 
                 });
                 const sourceMatch = res3.data.match(/"securedLink"\s*:\s*"([^"]+)"/);
                 if (sourceMatch) return res.json({ success: true, m3u8: sourceMatch[1].replace(/\\\//g, '/'), referer: embedUrl });
+                
+                // M3u8 alınamazsa direkt video oynatıcısına gönder
+                return res.json({ success: false, fallback: fallbackUrl });
             } 
+            
             const res4 = await axios.get(embedUrl, { headers: { "User-Agent": headers["User-Agent"], "Referer": url } });
             let m3u8Match = res4.data.match(/(https?:\/\/[^\s"'<>`]+?\.m3u8[^\s"'<>`]*)/i);
             if (m3u8Match) return res.json({ success: true, m3u8: m3u8Match[1].replace(/\\\//g, '/'), referer: embedUrl });
-            return res.json({ success: false, fallback: embedUrl, originalUrl: url });
+            
+            return res.json({ success: false, fallback: embedUrl });
         } catch (innerError) {
-            return res.json({ success: false, fallback: embedUrl, originalUrl: url });
+            return res.json({ success: false, fallback: embedUrl });
         }
     } catch (e) { res.status(500).json({ success: false }); }
-});
-
-// SİYAH EKRAN AMELİYATHANESİ
-app.get('/api/embed_player', async (req, res) => {
-    try {
-        const url = req.query.url;
-        const response = await axios.get(url, { headers: { "Referer": MAIN_URL, "User-Agent": headers["User-Agent"] }});
-        let html = response.data;
-        // Tüm kısıtlamaları ve reklam scriptlerini etkisiz hale getir
-        html = html.replace(/window\.top/g, "window.self").replace(/window\.parent/g, "window.self").replace(/top\.location/g, "self.location");
-        html = html.replace(/<script\b[^>]*>([\s\S]*?)<\/script>/g, (match, content) => {
-            if (content.includes("top.location") || content.includes("frame") || content.includes("restrict")) return "";
-            return match;
-        });
-        const origin = new URL(url).origin;
-        html = html.replace('<head>', `<head><base href="${origin}/"><meta name="referrer" content="always">`);
-        res.send(html);
-    } catch (e) { res.redirect(req.query.url); }
 });
 
 app.get('/api/proxy_m3u8', async (req, res) => {
@@ -153,6 +135,7 @@ app.get('/api/proxy_m3u8', async (req, res) => {
             if (trimmed === '' || trimmed.startsWith('#EXT-X-STREAM-INF')) return line;
             if (trimmed.startsWith('#EXT')) {
                 return trimmed.replace(/URI="([^"]+)"/g, (match, p1) => {
+                    if (p1.startsWith('data:')) return match;
                     const targetUrl = new URL(p1, baseUrl).href;
                     if (targetUrl.includes('.m3u8')) return `URI="/api/proxy_m3u8?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}"`;
                     else return `URI="/api/proxy_ts?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}"`;
