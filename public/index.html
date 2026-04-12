@@ -1,30 +1,153 @@
-<!DOCTYPE html><html lang="tr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ana Sayfa</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box;font-family:sans-serif;} body{background:#121212;color:#fff;}
-header{padding:15px;background:#1f1f1f;text-align:center;font-size:20px;font-weight:bold;color:#e50914;}
-.cats{display:flex;gap:10px;padding:15px;overflow-x:auto;white-space:nowrap;}
-.cats button{padding:10px 15px;background:#333;color:#fff;border:none;border-radius:20px;cursor:pointer;}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:15px;padding:15px;}
-.card{background:#1f1f1f;border-radius:8px;overflow:hidden;text-align:center;}
-.card img{width:100%;height:180px;object-fit:cover;} .card h3{font-size:14px;padding:10px;}
-</style></head><body>
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ana Sayfa</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box;font-family:sans-serif;} 
+        body{background:#121212;color:#fff; padding-bottom: 30px;}
+        header{padding:15px;background:#1f1f1f;text-align:center;font-size:22px;font-weight:bold;color:#e50914;}
+        
+        .search-bar { display: flex; gap: 10px; padding: 15px; background:#1a1a1a; }
+        .search-bar input { flex: 1; padding: 10px; border-radius: 5px; border: none; background: #333; color: #fff; font-size: 16px; outline: none;}
+        .search-bar button { padding: 10px 15px; background: #e50914; color: #fff; border: none; border-radius: 5px; font-weight: bold;}
+        
+        .cats{display:flex;gap:10px;padding:15px;overflow-x:auto;white-space:nowrap; background:#121212;}
+        .cats button{padding:10px 15px; background:#333; color:#fff; border:none; border-radius:20px; cursor:pointer; font-weight:bold; transition: 0.3s;}
+        .cats button.active { background: #e50914; }
+        
+        .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:15px;padding:15px;}
+        .card{background:#1f1f1f;border-radius:8px;overflow:hidden;text-align:center; box-shadow: 0 4px 10px rgba(0,0,0,0.5);}
+        .card img{width:100%;height:160px;object-fit:cover;} 
+        .card h3{font-size:13px;padding:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+        
+        .load-more { display: none; width: 90%; margin: 20px auto; padding: 15px; background: #333; color: #fff; text-align: center; font-weight: bold; font-size: 16px; border-radius: 8px; cursor: pointer; border: none;}
+        .load-more:active { background: #e50914; }
+        #status-msg { text-align:center; width:100%; padding:20px; color:#aaa; font-size: 18px; }
+    </style>
+</head>
+<body>
+
 <header>Kekik Yayın</header>
-<div class="cats">
-    <button onclick="load('netflix')">Netflix</button> <button onclick="load('exxen')">Exxen</button>
-    <button onclick="load('blutv')">BluTV</button> <button onclick="load('disney-plus')">Disney+</button>
+
+<div class="search-bar">
+    <input type="text" id="searchInput" placeholder="Dizi veya Film ara..." onkeypress="if(event.key === 'Enter') doSearch()">
+    <button onclick="doSearch()">ARA</button>
 </div>
+
+<div class="cats" id="cat-list">
+    <button onclick="loadCat('diziler', 'main', this)" class="active">Diziler</button>
+    <button onclick="loadCat('filmler', 'main', this)">Filmler</button>
+    <button onclick="loadCat('netflix', 'platform', this)">Netflix</button>
+    <button onclick="loadCat('exxen', 'platform', this)">Exxen</button>
+    <button onclick="loadCat('blutv', 'platform', this)">BluTV</button>
+    <button onclick="loadCat('disney-plus', 'platform', this)">Disney+</button>
+    <button onclick="loadCat('prime-video', 'platform', this)">Amazon Prime</button>
+    <button onclick="loadCat('bilim-kurgu', 'kategori', this)">Bilimkurgu</button>
+    <button onclick="loadCat('komedi', 'kategori', this)">Komedi</button>
+    <button onclick="loadCat('belgesel', 'kategori', this)">Belgesel</button>
+</div>
+
 <main id="grid" class="grid"></main>
+<div id="status-msg"></div>
+
+<button id="loadMoreBtn" class="load-more" onclick="loadNextPage()">⬇ Daha Fazla Yükle ⬇</button>
+
 <script>
-window.onload = () => load('netflix');
-async function load(cat) {
-    const grid = document.getElementById('grid'); grid.innerHTML = 'Yükleniyor...';
-    const res = await fetch(`/api/category?name=${cat}`); const result = await res.json();
-    grid.innerHTML = '';
-    result.data.forEach(item => {
-        const div = document.createElement('div'); div.className = 'card';
-        div.innerHTML = `<img src="${item.poster}"><h3>${item.title}</h3>`;
-        div.onclick = () => window.location.href = `dizi.html?url=${encodeURIComponent(item.link)}`;
-        grid.appendChild(div);
-    });
-}
-</script></body></html>
+    let currentId = 'diziler';
+    let currentType = 'main';
+    let currentPage = 1;
+    let isSearch = false;
+
+    window.onload = () => loadCat('diziler', 'main', document.querySelector('.cats button.active'));
+
+    async function loadCat(id, type, btnElement) {
+        isSearch = false;
+        currentId = id;
+        currentType = type;
+        currentPage = 1;
+        
+        // Buton renklerini ayarla
+        document.querySelectorAll('.cats button').forEach(b => b.classList.remove('active'));
+        if(btnElement) btnElement.classList.add('active');
+
+        document.getElementById('grid').innerHTML = '';
+        document.getElementById('loadMoreBtn').style.display = 'none';
+        document.getElementById('status-msg').innerText = 'Yükleniyor...';
+
+        await fetchAndRender();
+    }
+
+    async function loadNextPage() {
+        if(isSearch) return; // Aramada sayfalama yok
+        currentPage++;
+        document.getElementById('loadMoreBtn').innerText = 'Yükleniyor...';
+        await fetchAndRender();
+        document.getElementById('loadMoreBtn').innerText = '⬇ Daha Fazla Yükle ⬇';
+    }
+
+    async function doSearch() {
+        const query = document.getElementById('searchInput').value.trim();
+        if(!query) return;
+
+        isSearch = true;
+        document.querySelectorAll('.cats button').forEach(b => b.classList.remove('active'));
+        document.getElementById('grid').innerHTML = '';
+        document.getElementById('loadMoreBtn').style.display = 'none';
+        document.getElementById('status-msg').innerText = 'Aranıyor...';
+
+        try {
+            const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+            const result = await res.json();
+            document.getElementById('status-msg').innerText = '';
+            
+            if(result.success && result.data.length > 0) {
+                renderCards(result.data);
+            } else {
+                document.getElementById('status-msg').innerText = 'Sonuç bulunamadı.';
+            }
+        } catch (error) {
+            document.getElementById('status-msg').innerText = 'Arama hatası!';
+        }
+    }
+
+    async function fetchAndRender() {
+        try {
+            const res = await fetch(`/api/category?id=${currentId}&type=${currentType}&page=${currentPage}`);
+            const result = await res.json();
+            document.getElementById('status-msg').innerText = '';
+
+            if(result.success && result.data.length > 0) {
+                renderCards(result.data);
+                document.getElementById('loadMoreBtn').style.display = 'block'; // Diğer sayfalar için butonu göster
+            } else {
+                if(currentPage === 1) document.getElementById('status-msg').innerText = 'İçerik bulunamadı.';
+                else document.getElementById('status-msg').innerText = 'Tüm içerikler yüklendi.';
+                document.getElementById('loadMoreBtn').style.display = 'none';
+            }
+        } catch (error) {
+            document.getElementById('status-msg').innerText = 'Bağlantı Hatası!';
+        }
+    }
+
+    function renderCards(items) {
+        const grid = document.getElementById('grid');
+        items.forEach(item => {
+            const div = document.createElement('div'); 
+            div.className = 'card';
+            // Resim hatası almamak için önlem eklendi
+            let posterSrc = item.poster ? item.poster : 'https://via.placeholder.com/150x220?text=Resim+Yok';
+            div.innerHTML = `<img src="${posterSrc}"><h3>${item.title}</h3>`;
+            div.onclick = () => window.location.href = `diziler.html?url=${encodeURIComponent(item.link)}`;
+            
+            // Dizi sayfasına yönlendir (senin public dosyanın adı dizi.html mi yoksa diziler.html mi ona göre ayarla)
+            // Bir önceki mesajlarında dizi.html olarak oluşturmuştuk, onu güncelliyorum:
+            div.onclick = () => window.location.href = `dizi.html?url=${encodeURIComponent(item.link)}`;
+            
+            grid.appendChild(div);
+        });
+    }
+</script>
+</body>
+</html>
