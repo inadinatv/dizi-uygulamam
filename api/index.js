@@ -40,7 +40,9 @@ app.get('/api/category', async (req, res) => {
 app.get('/api/search', async (req, res) => {
     try {
         const query = encodeURIComponent(req.query.q);
-        const response = await axios.get(`${MAIN_URL}/ajax-search?q=${query}`, { headers: { ...headers, "X-Requested-With": "XMLHttpRequest" } });
+        const response = await axios.get(`${MAIN_URL}/ajax-search?q=${query}`, {
+            headers: { ...headers, "X-Requested-With": "XMLHttpRequest" }
+        });
         let results =[];
         if (response.data && response.data.results) {
             results = response.data.results.map(item => ({ title: item.title, link: item.url, poster: item.poster }));
@@ -90,62 +92,51 @@ app.get('/api/video', async (req, res) => {
         if (!embedUrlRaw) embedUrlRaw = $('#videoContainer iframe').attr('data-src') || $('#videoContainer iframe').attr('src') || $('iframe').attr('src');
         if (!embedUrlRaw) return res.json({ success: false, message: `Video embed kaynağı bulunamadı.` });
 
+        // BURASI ÖNEMLİ: Linki boşluklardan ve gizli tırnak işaretlerinden arındırıyoruz!
         let embedUrl = embedUrlRaw.replace(/\\\//g, '/').replace(/['"]/g, '').trim();
+        
         try {
-            if (embedUrl.startsWith('//')) embedUrl = `https:${embedUrl}`;
-            else if (!embedUrl.startsWith('http')) embedUrl = `https://${embedUrl}`;
-        } catch(err) { embedUrl = embedUrlRaw; }
+            if (embedUrl.startsWith('//')) {
+                embedUrl = `https:${embedUrl}`;
+            } else if (!embedUrl.startsWith('http')) {
+                if (embedUrl.startsWith('/')) {
+                    const originObj = new URL(url);
+                    embedUrl = originObj.origin + embedUrl;
+                } else {
+                    embedUrl = `https://${embedUrl}`;
+                }
+            }
+        } catch(err) {
+            embedUrl = embedUrlRaw;
+        }
 
         try {
-            // İMAGESTOO VİDEOLARI İÇİN ÇÖZÜM
             if (embedUrl.includes('imagestoo')) {
                 const videoId = embedUrl.split('/').pop();
-                
-                // 1. API İsteği Atıp VIP Çerezi Yakala
                 const res3 = await axios.post(`https://imagestoo.com/player/index.php?data=${videoId}&do=getVideo`, "", { headers: { "User-Agent": headers["User-Agent"], "X-Requested-With": "XMLHttpRequest", "Referer": embedUrl } });
-                
-                let imagestooCookie = "";
-                if (res3.headers['set-cookie']) {
-                    imagestooCookie = res3.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
-                }
-
                 const sourceMatch = res3.data.match(/"securedLink"\s*:\s*"([^"]+)"/);
-                if (sourceMatch) {
-                    // Bulunan çerezi API yanıtına ekliyoruz ki proxy motorumuz kullansın!
-                    return res.json({ success: true, m3u8: sourceMatch[1].replace(/\\\//g, '/'), referer: embedUrl, cookie: imagestooCookie });
-                }
-                
-                // 404 vermemesi için doğru embed linkini (B planını) oluştur
-                const fallbackUrl = `https://imagestoo.com/e/${videoId}`;
-                return res.json({ success: false, fallback: fallbackUrl, message: "Imagestoo M3U8 yok." });
-            } 
-            else {
-                // STANDART VİDEOLAR
+                if (sourceMatch) return res.json({ success: true, m3u8: sourceMatch[1].replace(/\\\//g, '/'), referer: embedUrl });
+            } else {
                 const res4 = await axios.get(embedUrl, { headers: { "User-Agent": headers["User-Agent"], "Referer": url } });
-                let m3u8Match = res4.data.match(/(?:file|src|source)\s*[:=]\s*["']([^"']+\.m3u8[^"']*)["']/i) || res4.data.match(/(https?:\/\/[^"']+\.m3u8[^"']*)/i);
-                if (m3u8Match) return res.json({ success: true, m3u8: m3u8Match[1].replace(/\\\//g, '/'), referer: embedUrl, cookie: "" });
+                let m3u8Match = res4.data.match(/(?:file|src|source)\s*[:=]\s*["']([^"']+\.m3u8[^"']*)["']/i);
+                if (!m3u8Match) m3u8Match = res4.data.match(/(https?:\/\/[^"']+\.m3u8[^"']*)/i);
+                if (m3u8Match) return res.json({ success: true, m3u8: m3u8Match[1].replace(/\\\//g, '/'), referer: embedUrl });
                 
                 let mp4Match = res4.data.match(/(?:file|src|source)\s*[:=]\s*["']([^"']+\.mp4[^"']*)["']/i);
-                if (mp4Match) return res.json({ success: true, m3u8: mp4Match[1].replace(/\\\//g, '/'), referer: embedUrl, cookie: "" });
+                if (mp4Match) return res.json({ success: true, m3u8: mp4Match[1].replace(/\\\//g, '/'), referer: embedUrl });
             }
             return res.json({ success: false, fallback: embedUrl, message: "M3U8 bulunamadı." });
         } catch (innerError) {
-            return res.json({ success: false, fallback: embedUrl, message: "Sunucu erişimi reddetti." });
+            return res.json({ success: false, fallback: embedUrl, message: "Sunucu erişimi reddetti (403)." });
         }
-    } catch (e) { res.status(500).json({ success: false, message: "Sunucu hatası." }); }
+    } catch (e) { res.status(500).json({ success: false, message: "Sunucu hatası: " + e.message }); }
 });
 
-// ÇEREZ TAŞIYICI PROXY (M3U8)
 app.get('/api/proxy_m3u8', async (req, res) => {
     try {
         const m3u8Url = req.query.url;
-        const referer = req.query.referer || MAIN_URL;
-        const reqCookie = req.query.cookie || ""; // Telefonda gelen çerezi al
-        
-        const response = await axios.get(m3u8Url, { 
-            headers: { "Referer": referer, "User-Agent": headers["User-Agent"], "Accept": "*/*", "Cookie": reqCookie } // VIP girişi yap
-        });
-        
+        const referer = (req.query.referer && req.query.referer !== 'undefined') ? req.query.referer : MAIN_URL;
+        const response = await axios.get(m3u8Url, { headers: { "Referer": referer, "User-Agent": headers["User-Agent"], "Accept": "*/*" }});
         const baseUrl = new URL(m3u8Url);
         const rewritten = response.data.split('\n').map(line => {
             let trimmed = line.trim();
@@ -154,14 +145,14 @@ app.get('/api/proxy_m3u8', async (req, res) => {
                 return trimmed.replace(/URI="([^"]+)"/g, (match, p1) => {
                     if (p1.startsWith('data:')) return match; 
                     const targetUrl = new URL(p1, baseUrl).href;
-                    if (targetUrl.includes('.m3u8')) return `URI="/api/proxy_m3u8?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}&cookie=${encodeURIComponent(reqCookie)}"`;
-                    else return `URI="/api/proxy_ts?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}&cookie=${encodeURIComponent(reqCookie)}"`;
+                    if (targetUrl.includes('.m3u8')) return `URI="/api/proxy_m3u8?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}"`;
+                    else return `URI="/api/proxy_ts?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}"`;
                 });
             }
             if (trimmed.startsWith('#')) return line;
             const targetUrl = new URL(trimmed, baseUrl).href;
-            if (targetUrl.includes('.m3u8')) return `/api/proxy_m3u8?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}&cookie=${encodeURIComponent(reqCookie)}`;
-            else return `/api/proxy_ts?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}&cookie=${encodeURIComponent(reqCookie)}`;
+            if (targetUrl.includes('.m3u8')) return `/api/proxy_m3u8?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}`;
+            else return `/api/proxy_ts?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}`;
         }).join('\n');
         
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
@@ -170,18 +161,11 @@ app.get('/api/proxy_m3u8', async (req, res) => {
     } catch (e) { res.status(500).send("M3U8 Hata"); }
 });
 
-// ÇEREZ TAŞIYICI PROXY (TS - Video Parçacıkları)
 app.get('/api/proxy_ts', async (req, res) => {
     try {
         const tsUrl = req.query.url;
-        const referer = req.query.referer || MAIN_URL;
-        const reqCookie = req.query.cookie || ""; // Parçaları indirirken de çerezi kullan
-        
-        const response = await axios.get(tsUrl, { 
-            responseType: 'stream', 
-            headers: { "Referer": referer, "User-Agent": headers["User-Agent"], "Accept": "*/*", "Cookie": reqCookie }
-        });
-        
+        const referer = (req.query.referer && req.query.referer !== 'undefined') ? req.query.referer : MAIN_URL;
+        const response = await axios.get(tsUrl, { responseType: 'stream', headers: { "Referer": referer, "User-Agent": headers["User-Agent"], "Accept": "*/*" }});
         const contentType = response.headers['content-type'] || 'application/octet-stream';
         res.setHeader('Content-Type', contentType);
         res.setHeader('Access-Control-Allow-Origin', '*');
