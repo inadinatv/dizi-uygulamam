@@ -13,20 +13,18 @@ const headers = {
     "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
 };
 
-// 1. KATEGORİ VE SAYFALAMA SİSTEMİ
+// --- DİZİLER VE BÖLÜMLERİ ÇEKME İŞLEMLERİ ---
 app.get('/api/category', async (req, res) => {
     try {
         const id = req.query.id || "diziler";
-        const type = req.query.type || "main"; // platform, kategori, main
+        const type = req.query.type || "main";
         const page = parseInt(req.query.page) || 1;
 
-        // URL Yapısını Belirle
         let targetUrl = MAIN_URL;
         if (type === "platform") targetUrl += `/platform/${id}`;
         else if (type === "kategori") targetUrl += `/kategori/${id}`;
-        else targetUrl += `/${id}`; // diziler, filmler vb.
+        else targetUrl += `/${id}`;
 
-        // Sayfa 2, 3, 4 vs...
         if (page > 1) targetUrl += `/page/${page}`;
 
         const response = await axios.get(targetUrl, { headers });
@@ -41,32 +39,22 @@ app.get('/api/category', async (req, res) => {
         });
         
         res.json({ success: true, data: series });
-    } catch (e) { 
-        res.status(500).json({ success: false, message: "Son sayfaya ulaşıldı veya hata oluştu." }); 
-    }
+    } catch (e) { res.status(500).json({ success: false }); }
 });
 
-// 2. ARAMA MOTORU SİSTEMİ (Dizipal'in kendi API'si)
 app.get('/api/search', async (req, res) => {
     try {
         const query = encodeURIComponent(req.query.q);
         const response = await axios.get(`${MAIN_URL}/ajax-search?q=${query}`, {
             headers: { ...headers, "X-Requested-With": "XMLHttpRequest" }
         });
-        // API JSON Döndürüyor
         let results =[];
         if (response.data && response.data.results) {
-            results = response.data.results.map(item => ({
-                title: item.title,
-                link: item.url,
-                poster: item.poster
-            }));
+            results = response.data.results.map(item => ({ title: item.title, link: item.url, poster: item.poster }));
         }
         res.json({ success: true, data: results });
     } catch (e) { res.status(500).json({ success: false }); }
 });
-
-// --- DİĞER FONKSİYONLAR (Aynı Kaldı) ---
 
 app.get('/api/episodes', async (req, res) => {
     try {
@@ -89,12 +77,14 @@ app.get('/api/video', async (req, res) => {
         const res1 = await axios.get(url, { headers });
         const $ = cheerio.load(res1.data);
         const configToken = $('#videoContainer').attr('data-cfg');
+        
         let cookies = res1.headers['set-cookie'] ? res1.headers['set-cookie'].map(c => c.split(';')[0]).join('; ') : "";
         if (!configToken) return res.json({ success: false, message: "Sayfa koruması geçilemedi." });
 
         const res2 = await axios.post(`${MAIN_URL}/ajax-player-config`, `cfg=${encodeURIComponent(configToken)}`, {
             headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest", "Origin": MAIN_URL, "Referer": url, "Cookie": cookies }
         });
+
         let configData = typeof res2.data === 'string' ? JSON.parse(res2.data) : res2.data;
         let embedUrlRaw = (configData.config && configData.config.v) ? configData.config.v : configData.v;
         if (!embedUrlRaw) return res.json({ success: false, message: `Embed alınamadı.` });
@@ -116,19 +106,44 @@ app.get('/api/video', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false }); }
 });
 
+// --- EN GELİŞMİŞ VİDEO PROXY SİSTEMİ (AES-128 ŞİFRE ÇÖZÜCÜ EKLENDİ) ---
 app.get('/api/proxy_m3u8', async (req, res) => {
     try {
         const m3u8Url = req.query.url;
-        const referer = req.query.referer;
-        const response = await axios.get(m3u8Url, { headers: { "Referer": referer || MAIN_URL, "User-Agent": headers["User-Agent"] }});
+        const referer = (req.query.referer && req.query.referer !== 'undefined') ? req.query.referer : MAIN_URL;
+        
+        const response = await axios.get(m3u8Url, {
+            headers: { "Referer": referer, "User-Agent": headers["User-Agent"], "Accept": "*/*" }
+        });
+        
         const baseUrl = new URL(m3u8Url);
         const rewritten = response.data.split('\n').map(line => {
             let trimmed = line.trim();
-            if (trimmed.startsWith('#') || trimmed === '') return line;
+            if (trimmed === '') return line;
+            
+            // BURASI YENİ: AES-128 Şifre Anahtarlarını ve Ses/Altyazı Dosyalarını Vercel'e Bağlar
+            if (trimmed.startsWith('#EXT')) {
+                return trimmed.replace(/URI="([^"]+)"/g, (match, p1) => {
+                    if (p1.startsWith('data:')) return match; // Base64 ise elleme
+                    const targetUrl = new URL(p1, baseUrl).href;
+                    if (targetUrl.includes('.m3u8')) {
+                        return `URI="/api/proxy_m3u8?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}"`;
+                    } else {
+                        return `URI="/api/proxy_ts?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}"`;
+                    }
+                });
+            }
+            
+            if (trimmed.startsWith('#')) return line;
+            
             const targetUrl = new URL(trimmed, baseUrl).href;
-            if (targetUrl.includes('.m3u8')) return `/api/proxy_m3u8?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}`;
-            else return `/api/proxy_ts?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}`;
+            if (targetUrl.includes('.m3u8')) {
+                return `/api/proxy_m3u8?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}`;
+            } else {
+                return `/api/proxy_ts?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}`;
+            }
         }).join('\n');
+        
         res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.send(rewritten);
@@ -138,10 +153,18 @@ app.get('/api/proxy_m3u8', async (req, res) => {
 app.get('/api/proxy_ts', async (req, res) => {
     try {
         const tsUrl = req.query.url;
-        const referer = req.query.referer;
-        const response = await axios.get(tsUrl, { responseType: 'stream', headers: { "Referer": referer || MAIN_URL, "User-Agent": headers["User-Agent"] }});
-        res.setHeader('Content-Type', 'video/MP2T');
+        const referer = (req.query.referer && req.query.referer !== 'undefined') ? req.query.referer : MAIN_URL;
+        
+        const response = await axios.get(tsUrl, {
+            responseType: 'stream', 
+            headers: { "Referer": referer, "User-Agent": headers["User-Agent"], "Accept": "*/*" }
+        });
+
+        // Sadece MP2T video formatı değil, Şifre Dosyası da (.bin) gelebilir. Karşı sitenin formatını yansıtıyoruz.
+        const contentType = response.headers['content-type'] || 'application/octet-stream';
+        res.setHeader('Content-Type', contentType);
         res.setHeader('Access-Control-Allow-Origin', '*');
+        
         response.data.pipe(res);
     } catch (e) { res.status(500).send("TS Hata"); }
 });
