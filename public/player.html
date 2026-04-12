@@ -4,26 +4,37 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sınırsız Oynatıcı</title>
+    <!-- Harici sitelerde Referer sorunu yaşamamak için güvenlik kodu -->
+    <meta name="referrer" content="no-referrer">
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
         body { margin: 0; background: #000; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; overflow: hidden; }
         .btn-back { position: absolute; top: 0; left: 0; width: 100%; padding: 15px; background: #e50914; color: #fff; text-decoration: none; text-align: center; font-weight: bold; z-index: 10; box-sizing: border-box;}
         
         video { width: 100%; height: 100vh; outline: none; background: #000; }
+        
+        /* B PLANINDA ÇALIŞACAK OLAN ÇERÇEVE */
+        iframe { width: 100%; height: 100vh; border: none; background: #000; display: none; margin-top: 50px; }
+        
         #info { padding: 20px; text-align: center; color: #aaa; z-index: 5; margin-top: 50px;}
+        .alt-btn { display:none; padding:15px; background:#e50914; color:#fff; text-decoration:none; font-weight:bold; border-radius:10px; margin-top:20px; text-align:center;}
     </style>
 </head>
 <body>
 
 <a href="#" onclick="history.back()" class="btn-back">⬅ Bölümlere Dön</a>
-<h3 id="info">Video Parçaları Birleştiriliyor... Bekleyin ⏳</h3>
+<h3 id="info">Güvenlik Duvarı Aşılıyor... ⏳</h3>
 
 <video id="video" controls playsinline style="display:none;"></video>
+<iframe id="iframe" allowfullscreen></iframe>
+<a id="alt-btn" class="alt-btn" href="#" target="_blank">Eğer açılmazsa Harici Oynatıcıda Aç</a>
 
 <script>
 async function initPlayer() {
     const info = document.getElementById('info');
     const video = document.getElementById('video');
+    const iframe = document.getElementById('iframe');
+    const altBtn = document.getElementById('alt-btn');
     const url = new URLSearchParams(window.location.search).get('url');
     
     try {
@@ -31,38 +42,35 @@ async function initPlayer() {
         const data = await res.json();
         
         if(data.success) {
+            // A PLANI: Vercel üzerinden temiz şekilde oynat
             info.style.display = 'none';
-            
-            // Tüm parçacıkları (.ts ve .m3u8) bizim Vercel'den çekecek o sihirli köprü:
             const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(data.m3u8)}&referer=${encodeURIComponent(data.referer)}`;
-            
             video.style.display = 'block';
             
             if(Hls.isSupported()){ 
-                const hls = new Hls({
-                    maxBufferSize: 20 * 1000 * 1000 // Kopmaları engellemek için 20MB önbellek
-                }); 
+                const hls = new Hls({ maxBufferSize: 20 * 1000 * 1000 }); 
                 hls.loadSource(proxyUrl); 
                 hls.attachMedia(video); 
                 hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
-                
-                hls.on(Hls.Events.ERROR, function (event, errData) {
-                    if (errData.fatal) {
-                        if(errData.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                            hls.startLoad(); // Ufak bağlantı kopukluğunda yenile
-                        } else {
-                            info.style.display = 'block';
-                            info.innerText = 'Video akışı koptu.';
-                        }
-                    }
-                });
-            }
-            // iOS cihazlar için direkt destek
-            else if(video.canPlayType('application/vnd.apple.mpegurl')) { 
+            } else if(video.canPlayType('application/vnd.apple.mpegurl')) { 
                 video.src = proxyUrl; 
                 video.play(); 
             }
-        } else { 
+        } 
+        else if (data.fallback) {
+            // B PLANI: 403 veya farklı bir engelle karşılaşıldığında devreye girer
+            info.style.display = 'none';
+            video.style.display = 'none';
+            
+            // Telefonun IP'sini kullanarak sitenin orijinal gömülü oynatıcısını açar
+            iframe.style.display = 'block';
+            iframe.src = data.fallback;
+            
+            // AppCreator24'te iframe engellenirse diye dev buton
+            altBtn.style.display = 'block';
+            altBtn.href = data.fallback;
+        } 
+        else { 
             info.innerText = 'Hata: ' + (data.message || 'Bulunamadı'); 
         }
     } catch(e) {
