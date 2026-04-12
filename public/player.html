@@ -8,20 +8,34 @@
     <style>
         body { margin: 0; background: #000; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; overflow: hidden; }
         .btn-back { position: absolute; top: 0; left: 0; width: 100%; padding: 15px; background: #e50914; color: #fff; text-decoration: none; text-align: center; font-weight: bold; z-index: 10; box-sizing: border-box;}
+        
         video { width: 100%; height: 100vh; outline: none; background: #000; }
-        #info { padding: 20px; text-align: center; color: #aaa; z-index: 5; margin-top: 50px; line-height: 1.6;}
+        iframe { width: 100%; height: 100vh; border: none; background: #000; display: none; margin-top: 50px; }
+        
+        #info { padding: 20px; text-align: center; color: #aaa; z-index: 5; margin-top: 50px;}
+        .alt-btn { display:none; padding:15px; background:#e50914; color:#fff; text-decoration:none; font-weight:bold; border-radius:10px; margin-top:20px; text-align:center; max-width: 90%; word-break: break-all; }
+        
+        .debug-link { font-size: 11px; color: #555; margin-top: 10px; text-align: center; display: none; padding: 0 10px;}
     </style>
 </head>
 <body>
 
 <a href="#" onclick="history.back()" class="btn-back">⬅ Bölümlere Dön</a>
 <h3 id="info">Güvenlik Duvarı Aşılıyor... ⏳</h3>
+
 <video id="video" controls playsinline style="display:none;"></video>
+<iframe id="iframe" allowfullscreen></iframe>
+
+<a id="alt-btn" class="alt-btn" href="#" target="_blank">Eğer açılmazsa Harici Oynatıcıda Aç</a>
+<div id="debug-link" class="debug-link"></div>
 
 <script>
 async function initPlayer() {
     const info = document.getElementById('info');
     const video = document.getElementById('video');
+    const iframe = document.getElementById('iframe');
+    const altBtn = document.getElementById('alt-btn');
+    const debugLink = document.getElementById('debug-link');
     const url = new URLSearchParams(window.location.search).get('url');
     
     try {
@@ -29,9 +43,11 @@ async function initPlayer() {
         const data = await res.json();
         
         if(data.success) {
-            // A PLANI: VERCEL BAŞARILI
             info.style.display = 'none';
-            const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(data.m3u8)}&referer=${encodeURIComponent(data.referer)}`;
+            
+            // Çerez parametresi proxy linkine eklendi
+            const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(data.m3u8)}&referer=${encodeURIComponent(data.referer)}&cookie=${encodeURIComponent(data.cookie || '')}`;
+            
             video.style.display = 'block';
             
             if(Hls.isSupported()){ 
@@ -44,47 +60,21 @@ async function initPlayer() {
                 video.play(); 
             }
         } 
-        else {
-            // B PLANI: TELEFON ÜZERİNDEN CORS PROXY SALDIRISI (Vercel engellendiyse)
-            if (data.isImagestoo) {
-                info.innerHTML = "Vercel Engellendi. İkincil Motor (Telefon) Devrede... ⏳";
-                try {
-                    const proxyApi = `https://corsproxy.io/?https://imagestoo.com/player/index.php?data=${data.videoId}&do=getVideo`;
-                    const clientRes = await fetch(proxyApi, {
-                        method: 'POST',
-                        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded' },
-                        body: "hash="
-                    });
-                    const clientText = await clientRes.text();
-                    const sourceMatch = clientText.match(/"securedLink"\s*:\s*"([^"]+)"/);
-                    
-                    if (sourceMatch) {
-                        let finalM3u8 = sourceMatch[1].replace(/\\\//g, '/');
-                        info.style.display = 'none';
-                        video.style.display = 'block';
-                        const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(finalM3u8)}&referer=${encodeURIComponent(data.embedUrl)}`;
-                        
-                        if(Hls.isSupported()){ 
-                            const hls = new Hls({ maxBufferSize: 20 * 1000 * 1000 }); 
-                            hls.loadSource(proxyUrl); 
-                            hls.attachMedia(video); 
-                            hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
-                        } else if(video.canPlayType('application/vnd.apple.mpegurl')) { 
-                            video.src = proxyUrl; 
-                            video.play(); 
-                        }
-                        return; // B Planı Başarılı, kodu burada kes!
-                    }
-                } catch(e) {}
-            }
+        else if (data.fallback) {
+            info.style.display = 'none';
+            video.style.display = 'none';
+            
+            iframe.style.display = 'block';
+            iframe.src = data.fallback;
+            
+            altBtn.style.display = 'block';
+            altBtn.href = data.fallback;
 
-            // C PLANI: NİHAİ BOMBA (Dizipal'in Orijinal Sayfasına Yönlendir)
-            info.innerHTML = "Özel Koruma Tespit Edildi.<br>Video %100 Garantili Olarak Ana Siteden Getiriliyor... 🍿";
-            setTimeout(() => {
-                // Burada "replace" komutu kullanıyoruz ki; izleyici filmi bitirip telefonun Geri Tuşuna 
-                // bastığında bu sayfaya takılmadan direkt uygulamamızdaki Bölüm listesine dönebilsin!
-                window.location.replace(data.originalUrl);
-            }, 1500);
+            debugLink.style.display = 'block';
+            debugLink.innerText = "Kaynak Linki: " + data.fallback;
+        } 
+        else { 
+            info.innerText = 'Hata: ' + (data.message || 'Bulunamadı'); 
         }
     } catch(e) {
         info.innerText = 'Sunucu Hatası!';
