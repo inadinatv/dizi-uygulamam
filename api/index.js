@@ -74,20 +74,42 @@ app.get('/api/video', async (req, res) => {
     try {
         const url = req.query.url;
         const res1 = await axios.get(url, { headers });
-        const $ = cheerio.load(res1.data);
-        const configToken = $('#videoContainer').attr('data-cfg');
+        const html = res1.data;
+        
+        // EĞER CLOUDFLARE BİZİ ENGELLERSE (Vercel IP Ban)
+        if (html.includes('Just a moment') || html.includes('cloudflare') || html.includes('Ray ID')) {
+            return res.json({ success: false, isCloudflare: true, originalUrl: url });
+        }
+
+        let cookies = "";
+        if (res1.headers['set-cookie']) {
+            cookies = res1.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
+        }
+        
+        // GLOBAL RADAR: Sayfanın neresinde olursa olsun Token'i ve Iframe'i bulur!
+        let configToken = null;
+        const tokenMatch = html.match(/data-cfg\s*=\s*["']([^"']+)["']/i);
+        if (tokenMatch) configToken = tokenMatch[1];
+
         let embedUrlRaw = null;
 
         if (configToken) {
-            const res2 = await axios.post(`${MAIN_URL}/ajax-player-config`, `cfg=${encodeURIComponent(configToken)}`, {
-                headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest", "Origin": MAIN_URL, "Referer": url }
-            });
-            let configData = typeof res2.data === 'string' ? JSON.parse(res2.data) : res2.data;
-            embedUrlRaw = (configData.config && configData.config.v) ? configData.config.v : configData.v;
+            try {
+                const res2 = await axios.post(`${MAIN_URL}/ajax-player-config`, `cfg=${encodeURIComponent(configToken)}`, {
+                    headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest", "Origin": MAIN_URL, "Referer": url, "Cookie": cookies }
+                });
+                let configData = typeof res2.data === 'string' ? JSON.parse(res2.data) : res2.data;
+                embedUrlRaw = (configData.config && configData.config.v) ? configData.config.v : configData.v;
+            } catch(err) {}
         }
 
-        if (!embedUrlRaw) embedUrlRaw = $('#videoContainer iframe').attr('data-src') || $('#videoContainer iframe').attr('src') || $('iframe').attr('src');
-        if (!embedUrlRaw) return res.json({ success: false, originalUrl: url });
+        // Token işe yaramadıysa HTML'nin içindeki tüm Iframe src'lerini tara
+        if (!embedUrlRaw) {
+            const iframeMatch = html.match(/<iframe[^>]+src\s*=\s*["']([^"']+)["']/i);
+            if (iframeMatch) embedUrlRaw = iframeMatch[1];
+        }
+
+        if (!embedUrlRaw) return res.json({ success: false, isCloudflare: false, originalUrl: url, message: "Sayfada video veya iframe bulunamadı." });
 
         let embedUrl = embedUrlRaw.replace(/\\\//g, '/').replace(/['"]/g, '').trim();
         try {
@@ -99,20 +121,23 @@ app.get('/api/video', async (req, res) => {
         } catch(err) { embedUrl = embedUrlRaw; }
 
         try {
+            // İMAGESTOO VİDEOLARI
             if (embedUrl.includes('imagestoo')) {
                 const videoId = embedUrl.split('/').pop();
-                // Orijinal gömülü oynatıcı linki oluşturuluyor
                 const fallbackUrl = `https://imagestoo.com/e/${videoId}`;
-                const res3 = await axios.post(`https://imagestoo.com/player/index.php?data=${videoId}&do=getVideo`, "hash=", { 
-                    headers: { "User-Agent": headers["User-Agent"], "X-Requested-With": "XMLHttpRequest", "Content-Type": "application/x-www-form-urlencoded", "Referer": embedUrl } 
-                });
-                const sourceMatch = res3.data.match(/"securedLink"\s*:\s*"([^"]+)"/);
-                if (sourceMatch) return res.json({ success: true, m3u8: sourceMatch[1].replace(/\\\//g, '/'), referer: embedUrl });
                 
-                // M3u8 alınamazsa direkt video oynatıcısına gönder
+                try {
+                    const res3 = await axios.post(`https://imagestoo.com/player/index.php?data=${videoId}&do=getVideo`, "hash=", { 
+                        headers: { "User-Agent": headers["User-Agent"], "X-Requested-With": "XMLHttpRequest", "Content-Type": "application/x-www-form-urlencoded", "Referer": embedUrl } 
+                    });
+                    const sourceMatch = res3.data.match(/"securedLink"\s*:\s*"([^"]+)"/);
+                    if (sourceMatch) return res.json({ success: true, m3u8: sourceMatch[1].replace(/\\\//g, '/'), referer: embedUrl });
+                } catch(e) {}
+                
                 return res.json({ success: false, fallback: fallbackUrl });
             } 
             
+            // DİĞER VİDEOLAR
             const res4 = await axios.get(embedUrl, { headers: { "User-Agent": headers["User-Agent"], "Referer": url } });
             let m3u8Match = res4.data.match(/(https?:\/\/[^\s"'<>`]+?\.m3u8[^\s"'<>`]*)/i);
             if (m3u8Match) return res.json({ success: true, m3u8: m3u8Match[1].replace(/\\\//g, '/'), referer: embedUrl });
@@ -121,7 +146,7 @@ app.get('/api/video', async (req, res) => {
         } catch (innerError) {
             return res.json({ success: false, fallback: embedUrl });
         }
-    } catch (e) { res.status(500).json({ success: false }); }
+    } catch (e) { res.status(500).json({ success: false, message: "Sunucu hatası." }); }
 });
 
 app.get('/api/proxy_m3u8', async (req, res) => {
