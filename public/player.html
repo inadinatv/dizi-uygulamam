@@ -10,6 +10,8 @@
         .btn-back { position: absolute; top: 0; left: 0; width: 100%; padding: 15px; background: #e50914; color: #fff; text-decoration: none; text-align: center; font-weight: bold; z-index: 10; box-sizing: border-box;}
         video { width: 100%; height: 100vh; outline: none; background: #000; }
         #info { padding: 20px; text-align: center; color: #aaa; z-index: 5; margin-top: 50px; line-height: 1.6;}
+        
+        .fallback-btn { display: inline-block; margin-top: 20px; padding: 15px 30px; background: #e50914; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -22,14 +24,17 @@
 async function initPlayer() {
     const info = document.getElementById('info');
     const video = document.getElementById('video');
-    const url = newSearchParams(window.location.search).get('url');
+    
+    // BURADAKİ HARF HATASI DÜZELTİLDİ! (URLSearchParams)
+    const urlParams = new URLSearchParams(window.location.search);
+    const url = urlParams.get('url');
     
     try {
         const res = await fetch(`/api/video?url=${encodeURIComponent(url)}`);
         const data = await res.json();
         
         if(data.success) {
-            // NORMAL VİDEOLAR (Şimdi yeniden çalışacak)
+            // NORMAL VİDEOLAR
             info.style.display = 'none';
             const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(data.m3u8)}&referer=${encodeURIComponent(data.referer)}`;
             
@@ -45,18 +50,19 @@ async function initPlayer() {
             }
         } 
         else if(data.fallback) {
-            // İNATÇI VİDEOLAR (Imagestoo vb.) - 404, Siyah Ekran vb. YOK!
-            // Seni doğrudan tertemiz, engeli olmayan video sayfasına fırlatır.
-            info.innerHTML = "Özel Video Kaynağına Yönlendiriliyor... 🚀";
+            // İNATÇI VİDEOLAR İÇİN (Direkt izleme sayfasına fırlatır)
+            // Eğer uygulama otomatik yönlendirmeyi engellerse diye buton ekledim.
+            info.innerHTML = `
+                Özel Video Kaynağına Yönlendiriliyor... 🚀<br>
+                <a href="${data.fallback}" class="fallback-btn">Eğer Açılmazsa Buraya Tıkla</a>
+            `;
             
             setTimeout(() => {
-                // "replace" komutu sayesinde, videoyu izleyip telefonun "Geri" tuşuna bastığında
-                // sonsuz döngüye girmeden tertemiz bir şekilde uygulamaya dönersin!
                 window.location.replace(data.fallback);
             }, 1000);
         }
         else { 
-            info.innerText = 'Video Bulunamadı: ' + (data.message || ''); 
+            info.innerText = 'Video Kaynağı Bulunamadı: ' + (data.message || ''); 
         }
     } catch(e) { 
         info.innerText = 'Sunucu Hatası!'; 
