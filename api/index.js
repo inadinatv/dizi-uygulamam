@@ -22,6 +22,7 @@ app.get('/api/category', async (req, res) => {
         if (type === "platform") targetUrl += `/platform/${id}`;
         else if (type === "kategori") targetUrl += `/kategori/${id}`;
         else targetUrl += `/${id}`;
+        
         targetUrl = targetUrl.replace(/\/$/, ""); 
         if (page > 1) targetUrl += `/page/${page}/`;
 
@@ -74,23 +75,15 @@ app.get('/api/video', async (req, res) => {
     try {
         const url = req.query.url;
         const res1 = await axios.get(url, { headers });
-        const html = res1.data;
+        const $ = cheerio.load(res1.data);
+        const configToken = $('#videoContainer').attr('data-cfg');
         
-        // EĞER CLOUDFLARE BİZİ ENGELLERSE (Vercel IP Ban)
-        if (html.includes('Just a moment') || html.includes('cloudflare') || html.includes('Ray ID')) {
-            return res.json({ success: false, isCloudflare: true, originalUrl: url });
-        }
-
+        // ÇEREZLERİMİZ YERLİ YERİNDE (Burası olmadan video çözülmez)
         let cookies = "";
         if (res1.headers['set-cookie']) {
             cookies = res1.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
         }
         
-        // GLOBAL RADAR: Sayfanın neresinde olursa olsun Token'i ve Iframe'i bulur!
-        let configToken = null;
-        const tokenMatch = html.match(/data-cfg\s*=\s*["']([^"']+)["']/i);
-        if (tokenMatch) configToken = tokenMatch[1];
-
         let embedUrlRaw = null;
 
         if (configToken) {
@@ -103,13 +96,8 @@ app.get('/api/video', async (req, res) => {
             } catch(err) {}
         }
 
-        // Token işe yaramadıysa HTML'nin içindeki tüm Iframe src'lerini tara
-        if (!embedUrlRaw) {
-            const iframeMatch = html.match(/<iframe[^>]+src\s*=\s*["']([^"']+)["']/i);
-            if (iframeMatch) embedUrlRaw = iframeMatch[1];
-        }
-
-        if (!embedUrlRaw) return res.json({ success: false, isCloudflare: false, originalUrl: url, message: "Sayfada video veya iframe bulunamadı." });
+        if (!embedUrlRaw) embedUrlRaw = $('#videoContainer iframe').attr('data-src') || $('#videoContainer iframe').attr('src') || $('iframe').attr('src');
+        if (!embedUrlRaw) return res.json({ success: false, fallback: url });
 
         let embedUrl = embedUrlRaw.replace(/\\\//g, '/').replace(/['"]/g, '').trim();
         try {
@@ -121,7 +109,7 @@ app.get('/api/video', async (req, res) => {
         } catch(err) { embedUrl = embedUrlRaw; }
 
         try {
-            // İMAGESTOO VİDEOLARI
+            // İMAGESTOO KONTROLÜ
             if (embedUrl.includes('imagestoo')) {
                 const videoId = embedUrl.split('/').pop();
                 const fallbackUrl = `https://imagestoo.com/e/${videoId}`;
@@ -134,6 +122,7 @@ app.get('/api/video', async (req, res) => {
                     if (sourceMatch) return res.json({ success: true, m3u8: sourceMatch[1].replace(/\\\//g, '/'), referer: embedUrl });
                 } catch(e) {}
                 
+                // Başaramazsa temiz video izleme sayfasına fırlat
                 return res.json({ success: false, fallback: fallbackUrl });
             } 
             
