@@ -10,6 +10,7 @@
         .btn-back { position: absolute; top: 0; left: 0; width: 100%; padding: 15px; background: #e50914; color: #fff; text-decoration: none; text-align: center; font-weight: bold; z-index: 10; box-sizing: border-box;}
         video { width: 100%; height: 100vh; outline: none; background: #000; }
         #info { padding: 20px; text-align: center; color: #aaa; z-index: 5; margin-top: 50px; line-height: 1.6;}
+        .fallback-btn { display: inline-block; margin-top: 20px; padding: 15px 30px; background: #e50914; color: white; text-decoration: none; border-radius: 5px; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -22,14 +23,15 @@
 async function initPlayer() {
     const info = document.getElementById('info');
     const video = document.getElementById('video');
-    const url = new URLSearchParams(window.location.search).get('url');
+    const urlParams = new URLSearchParams(window.location.search);
+    const url = urlParams.get('url');
     
     try {
         const res = await fetch(`/api/video?url=${encodeURIComponent(url)}`);
         const data = await res.json();
         
         if(data.success) {
-            // A PLANI BAŞARILI: M3u8 Linkini Dahili Oynatıcıda (Video Tag) açar.
+            // A PLANI (M3U8 Vercel Üzerinden)
             info.style.display = 'none';
             const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(data.m3u8)}&referer=${encodeURIComponent(data.referer)}`;
             
@@ -45,18 +47,26 @@ async function initPlayer() {
             }
         } 
         else if(data.fallback) {
-            // B PLANI BAŞARILI: Vercel M3U8 çekemezse, İframe (siyah ekran) kullanmak YERİNE,
-            // Doğrudan videonun kendi temiz sayfasına (Örn: Imagestoo izleme ekranına) yönlendirir.
-            info.innerHTML = "Özel Video Kaynağına Bağlanıyor... 🍿";
-            
+            // B PLANI (Temiz Oynatıcı Sayfasına Yönlendir)
+            info.innerHTML = `Videonun Temiz Sayfasına Yönlendiriliyor... 🚀`;
             setTimeout(() => {
-                // replace komutu, kullanıcı geri tuşuna bastığında tekrar
-                // player.html sayfasına düşüp döngüye girmesini engeller!
                 window.location.replace(data.fallback);
             }, 1000);
         }
+        else if (data.isCloudflare) {
+            // C PLANI (Eğer Vercel Engellenirse Telefonun Kendisini Kullan)
+            info.innerHTML = `
+                Sunucu Koruma Duvarına Takıldı.<br>
+                Lütfen videoyu orijinal sayfasında açın.<br><br>
+                <a href="${data.originalUrl}" class="fallback-btn">🎬 Orijinal Sayfada İzle</a>
+            `;
+        }
         else { 
-            info.innerText = 'Video Kaynağı Bulunamadı!'; 
+            // C PLANI Alternatifi: Hiçbir şey bulunamadıysa yine de orijinal sayfaya gitme butonu koy!
+            info.innerHTML = `
+                Video bulunamadı veya korumalı.<br><br>
+                <a href="${data.originalUrl}" class="fallback-btn">🎬 Orijinal Sayfada Dene</a>
+            `;
         }
     } catch(e) { 
         info.innerText = 'Sunucu Hatası!'; 
