@@ -1,4 +1,3 @@
-
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -78,7 +77,7 @@ app.get('/api/video', async (req, res) => {
         const $ = cheerio.load(res1.data);
         const configToken = $('#videoContainer').attr('data-cfg');
         
-        // İŞTE SİLİNEN VE BÜTÜN SİSTEMİ BOZAN O HAYATİ ÇEREZ KODU (GERİ EKLENDİ)
+        // Çerez (Cookies) sistemi aktif
         let cookies = "";
         if (res1.headers['set-cookie']) {
             cookies = res1.headers['set-cookie'].map(c => c.split(';')[0]).join('; ');
@@ -97,7 +96,7 @@ app.get('/api/video', async (req, res) => {
         }
 
         if (!embedUrlRaw) embedUrlRaw = $('#videoContainer iframe').attr('data-src') || $('#videoContainer iframe').attr('src') || $('iframe').attr('src');
-        if (!embedUrlRaw) return res.json({ success: false, message: "Token veya Iframe bulunamadı." });
+        if (!embedUrlRaw) return res.json({ success: false, message: "Video kaynağı bulunamadı." });
 
         let embedUrl = embedUrlRaw.replace(/\\\//g, '/').replace(/['"]/g, '').trim();
         try {
@@ -109,7 +108,7 @@ app.get('/api/video', async (req, res) => {
         } catch(err) { embedUrl = embedUrlRaw; }
 
         try {
-            // İMAGESTOO VİDEOLARI
+            // İMAGESTOO VİDEOLARI (Harici İframe Yönlendirmesi)
             if (embedUrl.includes('imagestoo')) {
                 const videoId = embedUrl.split('/').pop();
                 const fallbackUrl = `https://imagestoo.com/e/${videoId}`;
@@ -122,11 +121,11 @@ app.get('/api/video', async (req, res) => {
                     if (sourceMatch) return res.json({ success: true, m3u8: sourceMatch[1].replace(/\\\//g, '/'), referer: embedUrl });
                 } catch(e) {}
                 
-                // Vercel başarısız olursa B PLANINA gönder
+                // Vercel 403 yerse doğrudan videonun yüklü olduğu sayfaya gönder!
                 return res.json({ success: false, fallback: fallbackUrl });
             } 
             
-            // DİĞER NORMAL VİDEOLAR
+            // DİĞER VİDEOLAR (m3u8 tarayıcı)
             const res4 = await axios.get(embedUrl, { headers: { "User-Agent": headers["User-Agent"], "Referer": url } });
             let m3u8Match = res4.data.match(/(https?:\/\/[^\s"'<>`]+?\.m3u8[^\s"'<>`]*)/i);
             if (m3u8Match) return res.json({ success: true, m3u8: m3u8Match[1].replace(/\\\//g, '/'), referer: embedUrl });
@@ -135,7 +134,7 @@ app.get('/api/video', async (req, res) => {
         } catch (innerError) {
             return res.json({ success: false, fallback: embedUrl });
         }
-    } catch (e) { res.status(500).json({ success: false, message: e.message }); }
+    } catch (e) { res.status(500).json({ success: false, message: "Sunucu hatası." }); }
 });
 
 app.get('/api/proxy_m3u8', async (req, res) => {
