@@ -31,7 +31,7 @@ async function initPlayer() {
         const data = await res.json();
         
         if(data.success) {
-            // A PLANI (M3U8 Vercel Üzerinden)
+            // ÇALIŞAN VİDEOLAR GERİ GELDİ!
             info.style.display = 'none';
             const proxyUrl = `/api/proxy_m3u8?url=${encodeURIComponent(data.m3u8)}&referer=${encodeURIComponent(data.referer)}`;
             
@@ -47,26 +47,17 @@ async function initPlayer() {
             }
         } 
         else if(data.fallback) {
-            // B PLANI (Temiz Oynatıcı Sayfasına Yönlendir)
-            info.innerHTML = `Videonun Temiz Sayfasına Yönlendiriliyor... 🚀`;
+            // İNATÇI VİDEOLAR İÇİN DOĞRUDAN TEMİZ YÖNLENDİRME
+            info.innerHTML = `
+                Özel Video Kaynağına Yönlendiriliyor... 🚀<br>
+                <a href="${data.fallback}" class="fallback-btn">Eğer Açılmazsa Buraya Tıkla</a>
+            `;
             setTimeout(() => {
                 window.location.replace(data.fallback);
             }, 1000);
         }
-        else if (data.isCloudflare) {
-            // C PLANI (Eğer Vercel Engellenirse Telefonun Kendisini Kullan)
-            info.innerHTML = `
-                Sunucu Koruma Duvarına Takıldı.<br>
-                Lütfen videoyu orijinal sayfasında açın.<br><br>
-                <a href="${data.originalUrl}" class="fallback-btn">🎬 Orijinal Sayfada İzle</a>
-            `;
-        }
         else { 
-            // C PLANI Alternatifi: Hiçbir şey bulunamadıysa yine de orijinal sayfaya gitme butonu koy!
-            info.innerHTML = `
-                Video bulunamadı veya korumalı.<br><br>
-                <a href="${data.originalUrl}" class="fallback-btn">🎬 Orijinal Sayfada Dene</a>
-            `;
+            info.innerText = 'Video Bulunamadı!'; 
         }
     } catch(e) { 
         info.innerText = 'Sunucu Hatası!'; 
